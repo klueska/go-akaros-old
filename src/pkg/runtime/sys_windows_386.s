@@ -38,7 +38,7 @@ TEXT runtime·asmstdcall(SB),7,$0
 
 	RET
 
-TEXT	runtime·badsignal(SB),7,$24
+TEXT	runtime·badsignal2(SB),7,$24
 	// stderr
 	MOVL	$-12, 0(SP)
 	MOVL	SP, BP
@@ -86,7 +86,7 @@ TEXT runtime·sigtramp(SB),7,$28
 	MOVL	m(CX), AX
 	CMPL	AX, $0
 	JNE	2(PC)
-	CALL	runtime·badsignal(SB)
+	CALL	runtime·badsignal2(SB)
 
 	MOVL	g(CX), CX
 	MOVL	CX, 8(SP)
@@ -164,19 +164,16 @@ TEXT runtime·externalthreadhandler(SB),7,$0
 	POPL	BP
 	RET
 
-// Called from dynamic function created by ../thread.c compilecallback,
-// running on Windows stack (not Go stack).
-// BX, BP, SI, DI registers and DF flag are preserved
-// as required by windows callback convention.
-// AX = address of go func we need to call
-// DX = total size of arguments
-//
-TEXT runtime·callbackasm+0(SB),7,$0
-	// preserve whatever's at the memory location that
-	// the callback will use to store the return value
-	LEAL	8(SP), CX
-	PUSHL	0(CX)(DX*1)
-	ADDL	$4, DX			// extend argsize by size of return value
+GLOBL runtime·cbctxts(SB), $4
+
+TEXT runtime·callbackasm1+0(SB),7,$0
+  	MOVL	0(SP), AX	// will use to find our callback context
+
+	// remove return address from stack, we are not returning there
+	ADDL	$4, SP
+
+	// address to callback parameters into CX
+	LEAL	4(SP), CX
 
 	// save registers as required for windows callback
 	PUSHL	DI
@@ -189,18 +186,50 @@ TEXT runtime·callbackasm+0(SB),7,$0
 	PUSHL	0(FS)
 	MOVL	SP, 0(FS)
 
-	// callback parameters
-	PUSHL	DX
-	PUSHL	CX
-	PUSHL	AX
+	// determine index into runtime·cbctxts table
+	SUBL	$runtime·callbackasm(SB), AX
+	MOVL	$0, DX
+	MOVL	$5, BX	// divide by 5 because each call instruction in runtime·callbacks is 5 bytes long
+	DIVL	BX,
 
+	// find correspondent runtime·cbctxts table entry
+	MOVL	runtime·cbctxts(SB), BX
+	MOVL	-4(BX)(AX*4), BX
+
+	// extract callback context
+	MOVL	cbctxt_gobody(BX), AX
+	MOVL	cbctxt_argsize(BX), DX
+
+	// preserve whatever's at the memory location that
+	// the callback will use to store the return value
+	PUSHL	0(CX)(DX*1)
+
+	// extend argsize by size of return value
+	ADDL	$4, DX
+
+	// remember how to restore stack on return
+	MOVL	cbctxt_restorestack(BX), BX
+	PUSHL	BX
+
+	// call target Go function
+	PUSHL	DX			// argsize (including return value)
+	PUSHL	CX			// callback parameters
+	PUSHL	AX			// address of target Go function
 	CLD
-
 	CALL	runtime·cgocallback_gofunc(SB)
-
 	POPL	AX
 	POPL	CX
 	POPL	DX
+
+	// how to restore stack on return
+	POPL	BX
+
+	// return value into AX (as per Windows spec)
+	// and restore previously preserved value
+	MOVL	-4(CX)(DX*1), AX
+	POPL	-4(CX)(DX*1)
+
+	MOVL	BX, CX			// cannot use BX anymore
 
 	// pop SEH frame
 	POPL	0(FS)
@@ -212,10 +241,13 @@ TEXT runtime·callbackasm+0(SB),7,$0
 	POPL	SI
 	POPL	DI
 
+	// remove callback parameters before return (as per Windows spec)
+	POPL	DX
+	ADDL	CX, SP
+	PUSHL	DX
+
 	CLD
 
-	MOVL	-4(CX)(DX*1), AX
-	POPL	-4(CX)(DX*1)
 	RET
 
 // void tstart(M *newm);
@@ -295,28 +327,39 @@ TEXT runtime·remove_exception_handler(SB),7,$0
 
 	RET
 
-TEXT runtime·osyield(SB),7,$20
-	// Tried NtYieldExecution but it doesn't yield hard enough.
-	// NtWaitForSingleObject being used here as Sleep(0).
-	MOVL	runtime·NtWaitForSingleObject(SB), AX
-	MOVL	$-1, hi-4(SP)
-	MOVL	$-1, lo-8(SP)
-	LEAL	lo-8(SP), BX
-	MOVL	BX, ptime-12(SP)
-	MOVL	$0, alertable-16(SP)
-	MOVL	$-1, handle-20(SP)
-	MOVL	SP, BP
-	CALL	checkstack4<>(SB)
+// Sleep duration is in 100ns units.
+TEXT runtime·usleep1(SB),7,$0
+	MOVL	duration+0(FP), BX
+	MOVL	$runtime·usleep2(SB), AX // to hide from 8l
+
+	// Execute call on m->g0 stack, in case we are not actually
+	// calling a system call wrapper, like when running under WINE.
+	get_tls(CX)
+	CMPL	CX, $0
+	JNE	3(PC)
+	// Not a Go-managed thread. Do not switch stack.
 	CALL	AX
-	MOVL	BP, SP
 	RET
 
-TEXT runtime·usleep(SB),7,$20
-	MOVL	runtime·NtWaitForSingleObject(SB), AX 
-	// Have 1us units; need negative 100ns units.
-	// Assume multiply by 10 will not overflow 32-bit word.
-	MOVL	usec+0(FP), BX
-	IMULL	$10, BX
+	MOVL	m(CX), BP
+	MOVL	m_g0(BP), SI
+	CMPL	g(CX), SI
+	JNE	3(PC)
+	// executing on m->g0 already
+	CALL	AX
+	RET
+
+	// Switch to m->g0 stack and back.
+	MOVL	(g_sched+gobuf_sp)(SI), SI
+	MOVL	SP, -4(SI)
+	LEAL	-4(SI), SP
+	CALL	AX
+	MOVL	0(SP), SP
+	RET
+
+// Runs on OS stack. duration (in 100ns units) is in BX.
+TEXT runtime·usleep2(SB),7,$20
+	// Want negative 100ns units.
 	NEGL	BX
 	MOVL	$-1, hi-4(SP)
 	MOVL	BX, lo-8(SP)
@@ -325,15 +368,7 @@ TEXT runtime·usleep(SB),7,$20
 	MOVL	$0, alertable-16(SP)
 	MOVL	$-1, handle-20(SP)
 	MOVL	SP, BP
-	CALL	checkstack4<>(SB)
+	MOVL	runtime·NtWaitForSingleObject(SB), AX
 	CALL	AX
 	MOVL	BP, SP
-	RET
-
-// This function requires 4 bytes of stack,
-// to simulate what calling NtWaitForSingleObject will use.
-// (It is just a CALL to the system call dispatch.)
-// If the linker okays the call to checkstack4 (a NOSPLIT function)
-// then the call to NtWaitForSingleObject is okay too.
-TEXT checkstack4<>(SB),7,$4
 	RET

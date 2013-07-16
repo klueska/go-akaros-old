@@ -104,11 +104,15 @@ popdefer(void)
 static void
 freedefer(Defer *d)
 {
+	int32 total;
+
 	if(d->special) {
 		if(d->free)
 			runtime·free(d);
 	} else {
-		runtime·memclr((byte*)d->args, d->siz);
+		// Wipe out any possible pointers in argp/pc/fn/args.
+		total = sizeof(*d) + ROUND(d->siz, sizeof(uintptr)) - sizeof(d->args);
+		runtime·memclr((byte*)d, total);
 	}
 }
 
@@ -277,6 +281,7 @@ recovery(G *gp)
 	else
 		gp->sched.sp = (uintptr)argp - 2*sizeof(uintptr);
 	gp->sched.pc = pc;
+	gp->sched.lr = 0;
 	gp->sched.ret = 1;
 	runtime·gogo(&gp->sched);
 }

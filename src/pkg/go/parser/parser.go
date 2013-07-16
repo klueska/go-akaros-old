@@ -1170,25 +1170,27 @@ func (p *parser) parseIndexOrSlice(x ast.Expr) ast.Expr {
 
 	lbrack := p.expect(token.LBRACK)
 	p.exprLev++
-	var low, high ast.Expr
-	isSlice := false
+	var index [3]ast.Expr // change the 3 to 2 to disable slice expressions w/ cap
 	if p.tok != token.COLON {
-		low = p.parseRhs()
+		index[0] = p.parseRhs()
 	}
-	if p.tok == token.COLON {
-		isSlice = true
+	ncolons := 0
+	for p.tok == token.COLON && ncolons < len(index)-1 {
 		p.next()
-		if p.tok != token.RBRACK {
-			high = p.parseRhs()
+		ncolons++
+		if p.tok != token.COLON && p.tok != token.RBRACK && p.tok != token.EOF {
+			index[ncolons] = p.parseRhs()
 		}
 	}
 	p.exprLev--
 	rbrack := p.expect(token.RBRACK)
 
-	if isSlice {
-		return &ast.SliceExpr{X: x, Lbrack: lbrack, Low: low, High: high, Rbrack: rbrack}
+	if ncolons > 0 {
+		// slice expression
+		return &ast.SliceExpr{X: x, Lbrack: lbrack, Low: index[0], High: index[1], Max: index[2], Rbrack: rbrack}
 	}
-	return &ast.IndexExpr{X: x, Lbrack: lbrack, Index: low, Rbrack: rbrack}
+
+	return &ast.IndexExpr{X: x, Lbrack: lbrack, Index: index[0], Rbrack: rbrack}
 }
 
 func (p *parser) parseCallOrConversion(fun ast.Expr) *ast.CallExpr {
@@ -2145,12 +2147,13 @@ func (p *parser) parseImportSpec(doc *ast.CommentGroup, _ token.Token, _ int) as
 		ident = p.parseIdent()
 	}
 
-	var path *ast.BasicLit
+	pos := p.pos
+	var path string
 	if p.tok == token.STRING {
-		if !isValidImport(p.lit) {
-			p.error(p.pos, "invalid import path: "+p.lit)
+		path = p.lit
+		if !isValidImport(path) {
+			p.error(pos, "invalid import path: "+path)
 		}
-		path = &ast.BasicLit{ValuePos: p.pos, Kind: p.tok, Value: p.lit}
 		p.next()
 	} else {
 		p.expect(token.STRING) // use expect() error handling
@@ -2161,7 +2164,7 @@ func (p *parser) parseImportSpec(doc *ast.CommentGroup, _ token.Token, _ int) as
 	spec := &ast.ImportSpec{
 		Doc:     doc,
 		Name:    ident,
-		Path:    path,
+		Path:    &ast.BasicLit{ValuePos: pos, Kind: token.STRING, Value: path},
 		Comment: p.lineComment,
 	}
 	p.imports = append(p.imports, spec)
@@ -2177,8 +2180,9 @@ func (p *parser) parseValueSpec(doc *ast.CommentGroup, keyword token.Token, iota
 	idents := p.parseIdentList()
 	typ := p.tryType()
 	var values []ast.Expr
-	if p.tok == token.ASSIGN || keyword == token.CONST && (typ != nil || iota == 0) || keyword == token.VAR && typ == nil {
-		p.expect(token.ASSIGN)
+	// always permit optional initialization for more tolerant parsing
+	if p.tok == token.ASSIGN {
+		p.next()
 		values = p.parseRhsList()
 	}
 	p.expectSemi() // call before accessing p.linecomment

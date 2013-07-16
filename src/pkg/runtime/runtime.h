@@ -53,7 +53,6 @@ typedef	struct	Gobuf		Gobuf;
 typedef	struct	Lock		Lock;
 typedef	struct	M		M;
 typedef	struct	P		P;
-typedef	struct	Mem		Mem;
 typedef	struct	Note		Note;
 typedef	struct	Slice		Slice;
 typedef	struct	Stktop		Stktop;
@@ -78,6 +77,7 @@ typedef	struct	Complex64	Complex64;
 typedef	struct	Complex128	Complex128;
 typedef	struct	WinCall		WinCall;
 typedef	struct	SEH		SEH;
+typedef	struct	WinCallbackContext	WinCallbackContext;
 typedef	struct	Timers		Timers;
 typedef	struct	Timer		Timer;
 typedef	struct	GCStats		GCStats;
@@ -86,6 +86,7 @@ typedef	struct	ParFor		ParFor;
 typedef	struct	ParForThread	ParForThread;
 typedef	struct	CgoMal		CgoMal;
 typedef	struct	PollDesc	PollDesc;
+typedef	struct	DebugVars	DebugVars;
 
 /*
  * Per-CPU declaration.
@@ -269,9 +270,7 @@ struct	G
 };
 struct	M
 {
-	// The offsets of these fields are known to (hard-coded in) libmach.
 	G*	g0;		// goroutine with scheduling stack
-	void	(*morepc)(void);
 	void*	moreargp;	// argument pointer for more stack
 	Gobuf	morebuf;	// gobuf arg to morestack
 
@@ -284,6 +283,7 @@ struct	M
 	uintptr	tls[4];		// thread-local storage (for x86 extern register)
 	void	(*mstartfn)(void);
 	G*	curg;		// current running goroutine
+	G*	caughtsig;	// goroutine running during fatal signal
 	P*	p;		// attached P for executing Go code (nil if not executing Go code)
 	P*	nextp;
 	int32	id;
@@ -444,6 +444,13 @@ struct	SEH
 	void*	prev;
 	void*	handler;
 };
+// describes how to handle callback
+struct	WinCallbackContext
+{
+	void*	gobody;		// Go function to call
+	uintptr	argsize;	// callback arguments size (in bytes)
+	uintptr	restorestack;	// adjust stack on return by (in bytes) (386 only)
+};
 
 #ifdef GOOS_windows
 enum {
@@ -517,6 +524,12 @@ struct CgoMal
 {
 	CgoMal	*next;
 	void	*alloc;
+};
+
+// Holds variables parsed from GODEBUG env var.
+struct DebugVars
+{
+	int32	gctrace;
 };
 
 /*
@@ -669,7 +682,7 @@ struct Stkframe
 	uintptr	varlen;	// number of bytes at varp
 };
 
-int32	runtime·gentraceback(uintptr, uintptr, uintptr, G*, int32, uintptr*, int32, void(*)(Stkframe*, void*), void*);
+int32	runtime·gentraceback(uintptr, uintptr, uintptr, G*, int32, uintptr*, int32, void(*)(Stkframe*, void*), void*, bool);
 void	runtime·traceback(uintptr pc, uintptr sp, uintptr lr, G* gp);
 void	runtime·tracebackothers(G*);
 bool	runtime·haszeroargs(uintptr pc);
@@ -696,6 +709,7 @@ extern	uint32	runtime·maxstring;
 extern	uint32	runtime·Hchansize;
 extern	uint32	runtime·cpuid_ecx;
 extern	uint32	runtime·cpuid_edx;
+extern	DebugVars	runtime·debug;
 
 /*
  * common functions and data
@@ -747,7 +761,7 @@ int32	runtime·write(int32, void*, int32);
 int32	runtime·close(int32);
 int32	runtime·mincore(void*, uintptr, byte*);
 bool	runtime·cas(uint32*, uint32, uint32);
-bool	runtime·cas64(uint64*, uint64*, uint64);
+bool	runtime·cas64(uint64*, uint64, uint64);
 bool	runtime·casp(void**, void*, void*);
 // Don't confuse with XADD x86 instruction,
 // this one is actually 'addx', that is, add-and-fetch.
@@ -796,12 +810,14 @@ int32	runtime·mcount(void);
 int32	runtime·gcount(void);
 void	runtime·mcall(void(*)(G*));
 uint32	runtime·fastrand1(void);
+void	runtime·rewindmorestack(Gobuf*);
 
 void runtime·setmg(M*, G*);
 void runtime·newextram(void);
 void	runtime·exit(int32);
 void	runtime·breakpoint(void);
 void	runtime·gosched(void);
+void	runtime·gosched0(G*);
 void	runtime·park(void(*)(Lock*), Lock*, int8*);
 void	runtime·tsleep(int64, int8*);
 M*	runtime·newm(void);
@@ -833,6 +849,7 @@ int32	runtime·netpollopen(uintptr, PollDesc*);
 int32   runtime·netpollclose(uintptr);
 void	runtime·netpollready(G**, PollDesc*, int32);
 void	runtime·crash(void);
+void	runtime·parsedebugvars(void);
 void	_rt0_go(void);
 
 #pragma	varargck	argpos	runtime·printf	1
@@ -1008,7 +1025,7 @@ Hmap*	runtime·makemap_c(MapType*, int64);
 Hchan*	runtime·makechan_c(ChanType*, int64);
 void	runtime·chansend(ChanType*, Hchan*, byte*, bool*, void*);
 void	runtime·chanrecv(ChanType*, Hchan*, byte*, bool*, bool*);
-bool	runtime·showframe(Func*, bool);
+bool	runtime·showframe(Func*, G*);
 
 void	runtime·ifaceE2I(InterfaceType*, Eface, Iface*);
 

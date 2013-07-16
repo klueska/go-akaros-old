@@ -268,7 +268,6 @@ struct	Node
 	uchar	dupok;	// duplicate definitions ok (for func)
 	schar	likely; // likeliness of if statement
 	uchar	hasbreak;	// has break statement
-	uchar	norace;	// disable race detector for this function
 	uint	esc;		// EscXXX
 	int	funcdepth;
 
@@ -521,6 +520,8 @@ enum
 	OSLICE,	// v[1:2], typechecking may convert to a more specfic OSLICEXXX.
 	OSLICEARR,	// a[1:2]
 	OSLICESTR,	// s[1:2]
+	OSLICE3,	// v[1:2:3], typechecking may convert to OSLICE3ARR.
+	OSLICE3ARR,	// a[1:2:3]
 	ORECOVER,	// recover
 	ORECV,	// <-c
 	ORUNESTR,	// string(i)

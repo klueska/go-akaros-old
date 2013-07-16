@@ -27,6 +27,10 @@ var usageMessage = `Usage of go test:
   -bench="": passes -test.bench to test
   -benchmem=false: print memory allocation statistics for benchmarks
   -benchtime=1s: passes -test.benchtime to test
+  -cover=false: enable coverage analysis
+  -covermode="set": specifies mode for coverage analysis
+  -coverpkg="": comma-separated list of packages for coverage analysis
+  -coverprofile="": passes -test.coverprofile to test if -cover
   -cpu="": passes -test.cpu to test
   -cpuprofile="": passes -test.cpuprofile to test
   -memprofile="": passes -test.memprofile to test
@@ -63,7 +67,8 @@ var testFlagDefn = []*testFlagSpec{
 	{name: "c", boolVar: &testC},
 	{name: "file", multiOK: true},
 	{name: "i", boolVar: &testI},
-	{name: "cover"},
+	{name: "cover", boolVar: &testCover},
+	{name: "coverpkg"},
 
 	// build flags.
 	{name: "a", boolVar: &buildA},
@@ -82,6 +87,8 @@ var testFlagDefn = []*testFlagSpec{
 	{name: "bench", passToTest: true},
 	{name: "benchmem", boolVar: new(bool), passToTest: true},
 	{name: "benchtime", passToTest: true},
+	{name: "covermode"},
+	{name: "coverprofile", passToTest: true},
 	{name: "cpu", passToTest: true},
 	{name: "cpuprofile", passToTest: true},
 	{name: "memprofile", passToTest: true},
@@ -108,6 +115,7 @@ var testFlagDefn = []*testFlagSpec{
 func testFlags(args []string) (packageNames, passToTest []string) {
 	inPkg := false
 	outputDir := ""
+	testCoverMode = "set"
 	for i := 0; i < len(args); i++ {
 		if !strings.HasPrefix(args[i], "-") {
 			if !inPkg && packageNames == nil {
@@ -141,7 +149,7 @@ func testFlags(args []string) (packageNames, passToTest []string) {
 		var err error
 		switch f.name {
 		// bool flags.
-		case "a", "c", "i", "n", "x", "v", "work", "race":
+		case "a", "c", "i", "n", "x", "v", "race", "cover", "work":
 			setBoolFlag(f.boolVar, value)
 		case "p":
 			setIntFlag(&buildP, value)
@@ -173,15 +181,26 @@ func testFlags(args []string) (packageNames, passToTest []string) {
 			testTimeout = value
 		case "blockprofile", "cpuprofile", "memprofile":
 			testProfile = true
-		case "outputdir":
-			outputDir = value
-		case "cover":
+		case "coverpkg":
+			testCover = true
+			if value == "" {
+				testCoverPaths = nil
+			} else {
+				testCoverPaths = strings.Split(value, ",")
+			}
+		case "coverprofile":
+			testCover = true
+			testProfile = true
+		case "covermode":
 			switch value {
 			case "set", "count", "atomic":
-				testCover = value
+				testCoverMode = value
 			default:
 				fatalf("invalid flag argument for -cover: %q", value)
 			}
+			testCover = true
+		case "outputdir":
+			outputDir = value
 		}
 		if extraWord {
 			i++
@@ -190,6 +209,7 @@ func testFlags(args []string) (packageNames, passToTest []string) {
 			passToTest = append(passToTest, "-test."+f.name+"="+value)
 		}
 	}
+
 	// Tell the test what directory we're running in, so it can write the profiles there.
 	if testProfile && outputDir == "" {
 		dir, err := os.Getwd()

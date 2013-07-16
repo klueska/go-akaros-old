@@ -330,12 +330,17 @@ func TestCreateSelfSignedCertificate(t *testing.T) {
 			BasicConstraintsValid: true,
 			IsCA: true,
 
+			OCSPServer:            []string{"http://ocsp.example.com"},
+			IssuingCertificateURL: []string{"http://crt.example.com/ca1.crt"},
+
 			DNSNames:       []string{"test.example.com"},
 			EmailAddresses: []string{"gopher@golang.org"},
 			IPAddresses:    []net.IP{net.IPv4(127, 0, 0, 1).To4(), net.ParseIP("2001:4860:0:2001::68")},
 
 			PolicyIdentifiers:   []asn1.ObjectIdentifier{[]int{1, 2, 3}},
 			PermittedDNSDomains: []string{".example.com", "example.com"},
+
+			CRLDistributionPoints: []string{"http://crl1.example.com/ca1.crl", "http://crl2.example.com/ca1.crl"},
 		}
 
 		derBytes, err := CreateCertificate(random, &template, &template, test.pub, test.priv)
@@ -374,6 +379,14 @@ func TestCreateSelfSignedCertificate(t *testing.T) {
 			t.Errorf("%s: unknown extkeyusage wasn't correctly copied from the template. Got %v, want %v", test.name, cert.UnknownExtKeyUsage, testUnknownExtKeyUsage)
 		}
 
+		if !reflect.DeepEqual(cert.OCSPServer, template.OCSPServer) {
+			t.Errorf("%s: OCSP servers differ from template. Got %v, want %v", test.name, cert.OCSPServer, template.OCSPServer)
+		}
+
+		if !reflect.DeepEqual(cert.IssuingCertificateURL, template.IssuingCertificateURL) {
+			t.Errorf("%s: Issuing certificate URLs differ from template. Got %v, want %v", test.name, cert.IssuingCertificateURL, template.IssuingCertificateURL)
+		}
+
 		if !reflect.DeepEqual(cert.DNSNames, template.DNSNames) {
 			t.Errorf("%s: SAN DNS names differ from template. Got %v, want %v", test.name, cert.DNSNames, template.DNSNames)
 		}
@@ -384,6 +397,10 @@ func TestCreateSelfSignedCertificate(t *testing.T) {
 
 		if !reflect.DeepEqual(cert.IPAddresses, template.IPAddresses) {
 			t.Errorf("%s: SAN IPs differ from template. Got %v, want %v", test.name, cert.IPAddresses, template.IPAddresses)
+		}
+
+		if !reflect.DeepEqual(cert.CRLDistributionPoints, template.CRLDistributionPoints) {
+			t.Errorf("%s: CRL distribution points differ from template. Got %v, want %v", test.name, cert.CRLDistributionPoints, template.CRLDistributionPoints)
 		}
 
 		if test.checkSig {

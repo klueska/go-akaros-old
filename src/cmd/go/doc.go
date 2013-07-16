@@ -396,9 +396,11 @@ It prints a summary of the test results in the format:
 
 followed by detailed output for each failed package.
 
-'Go test' recompiles each package along with any files with names ending in
-"_test.go".  These additional files can contain test functions,
-benchmark functions, and example functions.  See 'go help testfunc' for more.
+'Go test' recompiles each package along with any files with names matching
+the file pattern "*_test.go".
+Files whose names begin with "_" (including "_test.go") or "." are ignored.
+These additional files can contain test functions, benchmark functions, and
+example functions.  See 'go help testfunc' for more.
 Each listed package causes the execution of a separate test binary.
 
 Test files that declare a package with the suffix "_test" will be compiled as a
@@ -584,6 +586,8 @@ single directory, the command is applied to a single synthesized
 package made up of exactly those files, ignoring any build constraints
 in those files and ignoring any other files in the directory.
 
+File names that begin with "." or "_" are ignored by the go tool.
+
 
 Remote import path syntax
 
@@ -738,17 +742,29 @@ control the execution of any test:
 	    if -test.blockprofile is set without this flag, all blocking events
 	    are recorded, equivalent to -test.blockprofilerate=1.
 
-	-cover set,count,atomic
-	    TODO: This feature is not yet fully implemented.
-	    TODO: Must run with -v to see output.
-	    TODO: Need control over output format,
-	    Set the mode for coverage analysis for the package[s] being tested.
-	    The default is to do none.
+	-cover
+	    Enable coverage analysis.
+
+	-covermode set,count,atomic
+	    Set the mode for coverage analysis for the package[s]
+	    being tested. The default is "set".
 	    The values:
-		set: boolean: does this statement execute?
-		count: integer: how many times does this statement execute?
-		atomic: integer: like count, but correct in multithreaded tests;
+		set: bool: does this statement run?
+		count: int: how many times does this statement run?
+		atomic: int: count, but correct in multithreaded tests;
 			significantly more expensive.
+	    Sets -cover.
+
+	-coverpkg pkg1,pkg2,pkg3
+	    Apply coverage analysis in each test to the given list of packages.
+	    The default is for each test to analyze only the package being tested.
+	    Packages are specified as import paths.
+	    Sets -cover.
+
+	-coverprofile cover.out
+	    Write a coverage profile to the specified file after all tests
+	    have passed.
+	    Sets -cover.
 
 	-cpu 1,2,4
 	    Specify a list of GOMAXPROCS values for which the tests or

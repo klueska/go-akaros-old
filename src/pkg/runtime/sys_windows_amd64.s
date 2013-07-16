@@ -60,7 +60,7 @@ loadregs:
 
 	RET
 
-TEXT runtime·badsignal(SB),7,$48
+TEXT runtime·badsignal2(SB),7,$48
 	// stderr
 	MOVQ	$-12, CX // stderr
 	MOVQ	CX, 0(SP)
@@ -118,7 +118,7 @@ TEXT runtime·sigtramp(SB),7,$0
 	MOVQ	m(CX), AX
 	CMPQ	AX, $0
 	JNE	2(PC)
-	CALL	runtime·badsignal(SB)
+	CALL	runtime·badsignal2(SB)
 
 	MOVQ	g(CX), CX
 	MOVQ	CX, 16(SP)
@@ -196,32 +196,37 @@ TEXT runtime·externalthreadhandler(SB),7,$0
 	POPQ	BP
 	RET
 
-// Continuation of thunk function created for each callback by ../thread.c compilecallback,
-// runs on Windows stack (not Go stack).
-// Thunk code designed to have minimal size for it is copied many (up to thousands) times.
-//
-// thunk:
-//	MOVQ	$fn, AX
-//	PUSHQ	AX
-//	MOVQ	$argsize, AX
-//	PUSHQ	AX
-//	MOVQ	$runtime·callbackasm, AX
-//	JMP	AX
-TEXT runtime·callbackasm(SB),7,$0
+GLOBL runtime·cbctxts(SB), $8
+
+TEXT runtime·callbackasm1(SB),7,$0
 	// Construct args vector for cgocallback().
 	// By windows/amd64 calling convention first 4 args are in CX, DX, R8, R9
 	// args from the 5th on are on the stack.
 	// In any case, even if function has 0,1,2,3,4 args, there is reserved
 	// but uninitialized "shadow space" for the first 4 args.
 	// The values are in registers.
-  	MOVQ	CX, (24+0)(SP)
-  	MOVQ	DX, (24+8)(SP)
-  	MOVQ	R8, (24+16)(SP)
-  	MOVQ	R9, (24+24)(SP)
-	// 6l does not accept writing POPQs here issuing a warning "unbalanced PUSH/POP"
-  	MOVQ	0(SP), DX	// POPQ DX
-  	MOVQ	8(SP), AX	// POPQ AX
-	ADDQ	$16, SP
+  	MOVQ	CX, (16+0)(SP)
+  	MOVQ	DX, (16+8)(SP)
+  	MOVQ	R8, (16+16)(SP)
+  	MOVQ	R9, (16+24)(SP)
+
+	// remove return address from stack, we are not returning there
+  	MOVQ	0(SP), AX
+	ADDQ	$8, SP
+
+	// determine index into runtime·cbctxts table
+	SUBQ	$runtime·callbackasm(SB), AX
+	MOVQ	$0, DX
+	MOVQ	$5, CX	// divide by 5 because each call instruction in runtime·callbacks is 5 bytes long
+	DIVL	CX,
+
+	// find correspondent runtime·cbctxts table entry
+	MOVQ	runtime·cbctxts(SB), CX
+	MOVQ	-8(CX)(AX*8), AX
+
+	// extract callback context
+	MOVQ	cbctxt_argsize(AX), DX
+	MOVQ	cbctxt_gobody(AX), AX
 
 	// preserve whatever's at the memory location that
 	// the callback will use to store the return value
@@ -231,8 +236,6 @@ TEXT runtime·callbackasm(SB),7,$0
 
 	// DI SI BP BX R12 R13 R14 R15 registers and DF flag are preserved
 	// as required by windows callback convention.
-	// 6l does not allow writing many PUSHQs here issuing a warning "nosplit stack overflow"
-	// the warning has no sense as this code uses os thread stack
 	PUSHFQ
 	SUBQ	$64, SP
 	MOVQ	DI, 56(SP)
@@ -247,18 +250,17 @@ TEXT runtime·callbackasm(SB),7,$0
 	// prepare call stack.  use SUBQ to hide from stack frame checks
 	// cgocallback(Go func, void *frame, uintptr framesize)
 	SUBQ	$24, SP
-	MOVQ	DX, 16(SP)	// uintptr framesize
-	MOVQ	CX, 8(SP)   // void *frame
-	MOVQ	AX, 0(SP)    // Go func
+	MOVQ	DX, 16(SP)	// argsize (including return value)
+	MOVQ	CX, 8(SP)	// callback parameters
+	MOVQ	AX, 0(SP)	// address of target Go function
 	CLD
-	CALL  runtime·cgocallback_gofunc(SB)
+	CALL	runtime·cgocallback_gofunc(SB)
 	MOVQ	0(SP), AX
 	MOVQ	8(SP), CX
 	MOVQ	16(SP), DX
 	ADDQ	$24, SP
 
 	// restore registers as required for windows callback
-	// 6l does not allow writing many POPs here issuing a warning "nosplit stack overflow"
 	MOVQ	0(SP), R15
 	MOVQ	8(SP), R14
 	MOVQ	16(SP), R13
@@ -320,34 +322,44 @@ TEXT runtime·install_exception_handler(SB),7,$0
 TEXT runtime·remove_exception_handler(SB),7,$0
 	RET
 
-TEXT runtime·osyield(SB),7,$8
-	// Tried NtYieldExecution but it doesn't yield hard enough.
-	// NtWaitForSingleObject being used here as Sleep(0).
-	// The CALL is safe because NtXxx is a system call wrapper:
-	// it puts the right system call number in AX, then does
-	// a SYSENTER and a RET.
-	MOVQ	runtime·NtWaitForSingleObject(SB), AX
-	MOVQ	$1, BX
-	NEGQ	BX
-	MOVQ	SP, R8 // ptime
-	MOVQ	BX, (R8)
-	MOVQ	$-1, CX // handle
-	MOVQ	$0, DX // alertable
+// Sleep duration is in 100ns units.
+TEXT runtime·usleep1(SB),7,$0
+	MOVL	duration+0(FP), BX
+	MOVQ	$runtime·usleep2(SB), AX // to hide from 6l
+
+	// Execute call on m->g0 stack, in case we are not actually
+	// calling a system call wrapper, like when running under WINE.
+	get_tls(R15)
+	CMPQ	R15, $0
+	JNE	3(PC)
+	// Not a Go-managed thread. Do not switch stack.
 	CALL	AX
 	RET
 
-TEXT runtime·usleep(SB),7,$8
-	// The CALL is safe because NtXxx is a system call wrapper:
-	// it puts the right system call number in AX, then does
-	// a SYSENTER and a RET.
-	MOVQ	runtime·NtWaitForSingleObject(SB), AX
-	// Have 1us units; want negative 100ns units.
-	MOVL	usec+0(FP), BX
-	IMULQ	$10, BX
+	MOVQ	m(R15), R14
+	MOVQ	m_g0(R14), R14
+	CMPQ	g(R15), R14
+	JNE	3(PC)
+	// executing on m->g0 already
+	CALL	AX
+	RET
+
+	// Switch to m->g0 stack and back.
+	MOVQ	(g_sched+gobuf_sp)(R14), R14
+	MOVQ	SP, -8(R14)
+	LEAQ	-8(R14), SP
+	CALL	AX
+	MOVQ	0(SP), SP
+	RET
+
+// Runs on OS stack. duration (in 100ns units) is in BX.
+TEXT runtime·usleep2(SB),7,$8
+	// Want negative 100ns units.
 	NEGQ	BX
 	MOVQ	SP, R8 // ptime
 	MOVQ	BX, (R8)
 	MOVQ	$-1, CX // handle
 	MOVQ	$0, DX // alertable
+	MOVQ	runtime·NtWaitForSingleObject(SB), AX
 	CALL	AX
 	RET

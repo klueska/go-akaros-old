@@ -36,6 +36,13 @@
 
 #include	<ar.h>
 
+enum
+{
+	// Whether to assume that the external linker is "gold"
+	// (http://sourceware.org/ml/binutils/2008-03/msg00162.html).
+	AssumeGoldLinker = 0,
+};
+
 int iconv(Fmt*);
 
 char	symname[]	= SYMDEF;
@@ -665,6 +672,9 @@ hostlink(void)
 	case '6':
 		argv[argc++] = "-m64";
 		break;
+	case '5':
+		// nothing required for arm
+		break;
 	}
 	if(!debug['s'] && !debug_s) {
 		argv[argc++] = "-gdwarf-2"; 
@@ -673,6 +683,10 @@ hostlink(void)
 	}
 	if(HEADTYPE == Hdarwin)
 		argv[argc++] = "-Wl,-no_pie,-pagezero_size,4000000";
+	
+	if(iself && AssumeGoldLinker)
+		argv[argc++] = "-Wl,--rosegment";
+
 	argv[argc++] = "-o";
 	argv[argc++] = outfile;
 	
@@ -1355,7 +1369,7 @@ pclntab(void)
 	oldlc = 0;
 	for(cursym = textp; cursym != nil; cursym = cursym->next) {
 		for(p = cursym->text; p != P; p = p->link) {
-			if(p->line == oldlc || p->as == ATEXT || p->as == ANOP) {
+			if(p->line == oldlc || p->as == ATEXT || p->as == ANOP || p->as == AUSEFIELD) {
 				if(debug['O'])
 					Bprint(&bso, "%6llux %P\n",
 						(vlong)p->pc, p);

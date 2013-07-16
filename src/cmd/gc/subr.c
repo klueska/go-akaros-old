@@ -615,23 +615,23 @@ algtype1(Type *t, Type **bad)
 		return -1;  // needs special compare
 
 	case TSTRUCT:
-		if(t->type != T && t->type->down == T) {
+		if(t->type != T && t->type->down == T && !isblanksym(t->type->sym)) {
 			// One-field struct is same as that one field alone.
 			return algtype1(t->type->type, bad);
 		}
 		ret = AMEM;
 		for(t1=t->type; t1!=T; t1=t1->down) {
-			// Blank fields and padding must be ignored,
-			// so need special compare.
-			if(isblanksym(t1->sym) || ispaddedfield(t1, t->width)) {
+			// All fields must be comparable.
+			a = algtype1(t1->type, bad);
+			if(a == ANOEQ)
+				return ANOEQ;
+
+			// Blank fields, padded fields, fields with non-memory
+			// equality need special compare.
+			if(a != AMEM || isblanksym(t1->sym) || ispaddedfield(t1, t->width)) {
 				ret = -1;
 				continue;
 			}
-			a = algtype1(t1->type, bad);
-			if(a == ANOEQ)
-				return ANOEQ;  // not comparable
-			if(a != AMEM)
-				ret = -1;  // needs special compare
 		}
 		return ret;
 	}
@@ -1260,7 +1260,7 @@ assignop(Type *src, Type *dst, char **why)
 					"\t\thave %S%hhT\n\t\twant %S%hhT", src, dst, missing->sym,
 					have->sym, have->type, missing->sym, missing->type);
 			else if(ptr)
-				*why = smprint(":\n\t%T does not implement %T (%S method requires pointer receiver)",
+				*why = smprint(":\n\t%T does not implement %T (%S method has pointer receiver)",
 					src, dst, missing->sym);
 			else if(have)
 				*why = smprint(":\n\t%T does not implement %T (missing %S method)\n"
@@ -2573,11 +2573,9 @@ genwrapper(Type *rcvr, Type *method, Sym *newnam, int iface)
 	dot = adddot(nod(OXDOT, this->left, newname(method->sym)));
 	
 	// generate call
-	if(isptr[rcvr->etype] && isptr[methodrcvr->etype] && method->embedded && !isifacemethod(method->type)) {
+	if(!flag_race && isptr[rcvr->etype] && isptr[methodrcvr->etype] && method->embedded && !isifacemethod(method->type)) {
 		// generate tail call: adjust pointer receiver and jump to embedded method.
-		fn->norace = 1; // something about this body makes the race detector unhappy.
-		// skip final .M
-		dot = dot->left;
+		dot = dot->left;	// skip final .M
 		if(!isptr[dotlist[0].field->type->etype])
 			dot = nod(OADDR, dot, N);
 		as = nod(OAS, this->left, nod(OCONVNOP, dot, N));

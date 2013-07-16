@@ -463,6 +463,10 @@ type Certificate struct {
 	SubjectKeyId   []byte
 	AuthorityKeyId []byte
 
+	// RFC 5280, 4.2.2.1 (Authority Information Access)
+	OCSPServer            []string
+	IssuingCertificateURL []string
+
 	// Subject Alternate Name values
 	DNSNames       []string
 	EmailAddresses []string
@@ -471,6 +475,9 @@ type Certificate struct {
 	// Name constraints
 	PermittedDNSDomainsCritical bool // if true then the name constraints are marked critical.
 	PermittedDNSDomains         []string
+
+	// CRL Distribution Points
+	CRLDistributionPoints []string
 
 	PolicyIdentifiers []asn1.ObjectIdentifier
 }
@@ -657,6 +664,24 @@ type nameConstraints struct {
 
 type generalSubtree struct {
 	Name string `asn1:"tag:2,optional,ia5"`
+}
+
+// RFC 5280, 4.2.2.1
+type authorityInfoAccess struct {
+	Method   asn1.ObjectIdentifier
+	Location asn1.RawValue
+}
+
+// RFC 5280, 4.2.1.14
+type distributionPoint struct {
+	DistributionPoint distributionPointName `asn1:"optional,tag:0"`
+	Reason            asn1.BitString        `asn1:"optional,tag:1"`
+	CRLIssuer         asn1.RawValue         `asn1:"optional,tag:2"`
+}
+
+type distributionPointName struct {
+	FullName     asn1.RawValue    `asn1:"optional,tag:0"`
+	RelativeName pkix.RDNSequence `asn1:"optional,tag:1"`
 }
 
 func parsePublicKey(algo PublicKeyAlgorithm, keyData *publicKeyInfo) (interface{}, error) {
@@ -896,6 +921,39 @@ func parseCertificate(in *certificate) (*Certificate, error) {
 				}
 				continue
 
+			case 31:
+				// RFC 5280, 4.2.1.14
+
+				// CRLDistributionPoints ::= SEQUENCE SIZE (1..MAX) OF DistributionPoint
+				//
+				// DistributionPoint ::= SEQUENCE {
+				//     distributionPoint       [0]     DistributionPointName OPTIONAL,
+				//     reasons                 [1]     ReasonFlags OPTIONAL,
+				//     cRLIssuer               [2]     GeneralNames OPTIONAL }
+				//
+				// DistributionPointName ::= CHOICE {
+				//     fullName                [0]     GeneralNames,
+				//     nameRelativeToCRLIssuer [1]     RelativeDistinguishedName }
+
+				var cdp []distributionPoint
+				_, err := asn1.Unmarshal(e.Value, &cdp)
+				if err != nil {
+					return nil, err
+				}
+
+				for _, dp := range cdp {
+					var n asn1.RawValue
+					_, err = asn1.Unmarshal(dp.DistributionPoint.FullName.Bytes, &n)
+					if err != nil {
+						return nil, err
+					}
+
+					if n.Tag == 6 {
+						out.CRLDistributionPoints = append(out.CRLDistributionPoints, string(n.Bytes))
+					}
+				}
+				continue
+
 			case 35:
 				// RFC 5280, 4.2.1.1
 				var a authKeyId
@@ -950,6 +1008,24 @@ func parseCertificate(in *certificate) (*Certificate, error) {
 				out.PolicyIdentifiers = make([]asn1.ObjectIdentifier, len(policies))
 				for i, policy := range policies {
 					out.PolicyIdentifiers[i] = policy.Policy
+				}
+			}
+		} else if e.Id.Equal(oidExtensionAuthorityInfoAccess) {
+			// RFC 5280 4.2.2.1: Authority Information Access
+			var aia []authorityInfoAccess
+			if _, err = asn1.Unmarshal(e.Value, &aia); err != nil {
+				return nil, err
+			}
+
+			for _, v := range aia {
+				// GeneralName: uniformResourceIdentifier [6] IA5String
+				if v.Location.Tag != 6 {
+					continue
+				}
+				if v.Method.Equal(oidAuthorityInfoAccessOcsp) {
+					out.OCSPServer = append(out.OCSPServer, string(v.Location.Bytes))
+				} else if v.Method.Equal(oidAuthorityInfoAccessIssuers) {
+					out.IssuingCertificateURL = append(out.IssuingCertificateURL, string(v.Location.Bytes))
 				}
 			}
 		}
@@ -1011,18 +1087,25 @@ func reverseBitsInAByte(in byte) byte {
 }
 
 var (
-	oidExtensionSubjectKeyId        = []int{2, 5, 29, 14}
-	oidExtensionKeyUsage            = []int{2, 5, 29, 15}
-	oidExtensionExtendedKeyUsage    = []int{2, 5, 29, 37}
-	oidExtensionAuthorityKeyId      = []int{2, 5, 29, 35}
-	oidExtensionBasicConstraints    = []int{2, 5, 29, 19}
-	oidExtensionSubjectAltName      = []int{2, 5, 29, 17}
-	oidExtensionCertificatePolicies = []int{2, 5, 29, 32}
-	oidExtensionNameConstraints     = []int{2, 5, 29, 30}
+	oidExtensionSubjectKeyId          = []int{2, 5, 29, 14}
+	oidExtensionKeyUsage              = []int{2, 5, 29, 15}
+	oidExtensionExtendedKeyUsage      = []int{2, 5, 29, 37}
+	oidExtensionAuthorityKeyId        = []int{2, 5, 29, 35}
+	oidExtensionBasicConstraints      = []int{2, 5, 29, 19}
+	oidExtensionSubjectAltName        = []int{2, 5, 29, 17}
+	oidExtensionCertificatePolicies   = []int{2, 5, 29, 32}
+	oidExtensionNameConstraints       = []int{2, 5, 29, 30}
+	oidExtensionCRLDistributionPoints = []int{2, 5, 29, 31}
+	oidExtensionAuthorityInfoAccess   = []int{1, 3, 6, 1, 5, 5, 7, 1, 1}
+)
+
+var (
+	oidAuthorityInfoAccessOcsp    = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 48, 1}
+	oidAuthorityInfoAccessIssuers = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 48, 2}
 )
 
 func buildExtensions(template *Certificate) (ret []pkix.Extension, err error) {
-	ret = make([]pkix.Extension, 8 /* maximum number of elements. */)
+	ret = make([]pkix.Extension, 10 /* maximum number of elements. */)
 	n := 0
 
 	if template.KeyUsage != 0 {
@@ -1094,6 +1177,28 @@ func buildExtensions(template *Certificate) (ret []pkix.Extension, err error) {
 		n++
 	}
 
+	if len(template.OCSPServer) > 0 || len(template.IssuingCertificateURL) > 0 {
+		ret[n].Id = oidExtensionAuthorityInfoAccess
+		var aiaValues []authorityInfoAccess
+		for _, name := range template.OCSPServer {
+			aiaValues = append(aiaValues, authorityInfoAccess{
+				Method:   oidAuthorityInfoAccessOcsp,
+				Location: asn1.RawValue{Tag: 6, Class: 2, Bytes: []byte(name)},
+			})
+		}
+		for _, name := range template.IssuingCertificateURL {
+			aiaValues = append(aiaValues, authorityInfoAccess{
+				Method:   oidAuthorityInfoAccessIssuers,
+				Location: asn1.RawValue{Tag: 6, Class: 2, Bytes: []byte(name)},
+			})
+		}
+		ret[n].Value, err = asn1.Marshal(aiaValues)
+		if err != nil {
+			return
+		}
+		n++
+	}
+
 	if len(template.DNSNames) > 0 || len(template.EmailAddresses) > 0 || len(template.IPAddresses) > 0 {
 		ret[n].Id = oidExtensionSubjectAltName
 		var rawValues []asn1.RawValue
@@ -1141,6 +1246,28 @@ func buildExtensions(template *Certificate) (ret []pkix.Extension, err error) {
 			out.Permitted[i] = generalSubtree{Name: permitted}
 		}
 		ret[n].Value, err = asn1.Marshal(out)
+		if err != nil {
+			return
+		}
+		n++
+	}
+
+	if len(template.CRLDistributionPoints) > 0 {
+		ret[n].Id = oidExtensionCRLDistributionPoints
+
+		var crlDp []distributionPoint
+		for _, name := range template.CRLDistributionPoints {
+			rawFullName, _ := asn1.Marshal(asn1.RawValue{Tag: 6, Class: 2, Bytes: []byte(name)})
+
+			dp := distributionPoint{
+				DistributionPoint: distributionPointName{
+					FullName: asn1.RawValue{Tag: 0, Class: 2, Bytes: rawFullName},
+				},
+			}
+			crlDp = append(crlDp, dp)
+		}
+
+		ret[n].Value, err = asn1.Marshal(crlDp)
 		if err != nil {
 			return
 		}

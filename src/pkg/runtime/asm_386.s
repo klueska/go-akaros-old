@@ -200,8 +200,6 @@ TEXT runtime·morestack(SB),7,$0
 	CMPL	g(CX), SI
 	JNE	2(PC)
 	INT	$3
-	
-	MOVL	DX, m_cret(BX)
 
 	// frame size in DI
 	// arg size in AX
@@ -220,9 +218,13 @@ TEXT runtime·morestack(SB),7,$0
 	MOVL	g(CX), SI
 	MOVL	SI, (m_morebuf+gobuf_g)(BX)
 
-	// Set m->morepc to f's PC.
-	MOVL	0(SP), AX
-	MOVL	AX, m_morepc(BX)
+	// Set g->sched to context in f.
+	MOVL	0(SP), AX	// f's PC
+	MOVL	AX, (g_sched+gobuf_pc)(SI)
+	MOVL	SI, (g_sched+gobuf_g)(SI)
+	LEAL	4(SP), AX	// f's SP
+	MOVL	AX, (g_sched+gobuf_sp)(SI)
+	MOVL	DX, (g_sched+gobuf_ctxt)(SI)
 
 	// Call newstack on m->g0's stack.
 	MOVL	m_g0(BX), BP
@@ -252,6 +254,11 @@ TEXT reflect·call(SB), 7, $0
 	MOVL	g(CX), AX
 	MOVL	AX, (m_morebuf+gobuf_g)(BX)
 
+	// Save our own state as the PC and SP to restore
+	// if this goroutine needs to be restarted.
+	MOVL	$reflect·call(SB), (g_sched+gobuf_pc)(AX)
+	MOVL	SP, (g_sched+gobuf_sp)(AX)
+
 	// Set up morestack arguments to call f on a new stack.
 	// We set f's frame size to 1, as a hint to newstack
 	// that this is a call from reflect·call.
@@ -262,7 +269,7 @@ TEXT reflect·call(SB), 7, $0
 	MOVL	8(SP), DX	// arg frame
 	MOVL	12(SP), CX	// arg size
 
-	MOVL	AX, m_morepc(BX)	// f's PC
+	MOVL	AX, m_cret(BX)	// f's PC
 	MOVL	DX, m_moreargp(BX)	// f's argument pointer
 	MOVL	CX, m_moreargsize(BX)	// f's argument size
 	MOVL	$1, m_moreframesize(BX)	// f's frame size
@@ -312,30 +319,26 @@ TEXT runtime·cas(SB), 7, $0
 	MOVL	$1, AX
 	RET
 
-// bool runtime·cas64(uint64 *val, uint64 *old, uint64 new)
+// bool runtime·cas64(uint64 *val, uint64 old, uint64 new)
 // Atomically:
 //	if(*val == *old){
 //		*val = new;
 //		return 1;
 //	} else {
-//		*old = *val
 //		return 0;
 //	}
 TEXT runtime·cas64(SB), 7, $0
 	MOVL	4(SP), BP
-	MOVL	8(SP), SI
-	MOVL	0(SI), AX
-	MOVL	4(SI), DX
-	MOVL	12(SP), BX
-	MOVL	16(SP), CX
+	MOVL	8(SP), AX
+	MOVL	12(SP), DX
+	MOVL	16(SP), BX
+	MOVL	20(SP), CX
 	LOCK
 	CMPXCHG8B	0(BP)
 	JNZ	cas64_fail
 	MOVL	$1, AX
 	RET
 cas64_fail:
-	MOVL	AX, 0(SI)
-	MOVL	DX, 4(SI)
 	MOVL	$0, AX
 	RET
 

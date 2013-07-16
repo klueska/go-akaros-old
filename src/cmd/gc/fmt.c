@@ -1022,6 +1022,8 @@ static int opprec[] = {
 	[OSLICE] = 8,
 	[OSLICESTR] = 8,
 	[OSLICEARR] = 8,
+	[OSLICE3] = 8,
+	[OSLICE3ARR] = 8,
 	[ODOTINTER] = 8,
 	[ODOTMETH] = 8,
 	[ODOTPTR] = 8,
@@ -1222,7 +1224,7 @@ exprfmt(Fmt *f, Node *n, int prec)
 		}
 		if(fmtmode == FExp && ptrlit)
 			// typecheck has overwritten OIND by OTYPE with pointer type.
-			return fmtprint(f, "&%T{ %,H }", n->right->type->type, n->list);
+			return fmtprint(f, "(&%T{ %,H })", n->right->type->type, n->list);
 		return fmtprint(f, "(%N{ %,H })", n->right, n->list);
 
 	case OPTRLIT:
@@ -1295,6 +1297,8 @@ exprfmt(Fmt *f, Node *n, int prec)
 	case OSLICE:
 	case OSLICESTR:
 	case OSLICEARR:
+	case OSLICE3:
+	case OSLICE3ARR:
 		exprfmt(f, n->left, nprec);
 		return fmtprint(f, "[%N]", n->right);
 

@@ -58,7 +58,7 @@ racewalk(Node *fn)
 	Node *nodpc;
 	char s[1024];
 
-	if(fn->norace || ispkgin(omit_pkgs, nelem(omit_pkgs)))
+	if(ispkgin(omit_pkgs, nelem(omit_pkgs)))
 		return;
 
 	if(!ispkgin(noinst_pkgs, nelem(noinst_pkgs))) {
@@ -304,6 +304,8 @@ racewalknode(Node **np, NodeList **init, int wr, int skip)
 
 	case OSLICE:
 	case OSLICEARR:
+	case OSLICE3:
+	case OSLICE3ARR:
 		// Seems to only lead to double instrumentation.
 		//racewalknode(&n->left, init, 0, 0);
 		goto ret;

@@ -553,12 +553,13 @@ func TestRoundTripGzip(t *testing.T) {
 		res, err := DefaultTransport.RoundTrip(req)
 		var body []byte
 		if test.compressed {
-			gzip, err := gzip.NewReader(res.Body)
+			var r *gzip.Reader
+			r, err = gzip.NewReader(res.Body)
 			if err != nil {
 				t.Errorf("%d. gzip NewReader: %v", i, err)
 				continue
 			}
-			body, err = ioutil.ReadAll(gzip)
+			body, err = ioutil.ReadAll(r)
 			res.Body.Close()
 		} else {
 			body, err = ioutil.ReadAll(res.Body)
@@ -1570,6 +1571,41 @@ func TestProxyFromEnvironment(t *testing.T) {
 		}
 		if got := fmt.Sprintf("%s", url); got != tt.want {
 			t.Errorf("%v: got URL = %q, want %q", tt, url, tt.want)
+		}
+	}
+}
+
+func TestIdleConnChannelLeak(t *testing.T) {
+	var mu sync.Mutex
+	var n int
+
+	ts := httptest.NewServer(HandlerFunc(func(w ResponseWriter, r *Request) {
+		mu.Lock()
+		n++
+		mu.Unlock()
+	}))
+	defer ts.Close()
+
+	tr := &Transport{
+		Dial: func(netw, addr string) (net.Conn, error) {
+			return net.Dial(netw, ts.Listener.Addr().String())
+		},
+	}
+	defer tr.CloseIdleConnections()
+
+	c := &Client{Transport: tr}
+
+	// First, without keep-alives.
+	for _, disableKeep := range []bool{true, false} {
+		tr.DisableKeepAlives = disableKeep
+		for i := 0; i < 5; i++ {
+			_, err := c.Get(fmt.Sprintf("http://foo-host-%d.tld/", i))
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := tr.IdleConnChMapSizeForTesting(); got != 0 {
+			t.Fatalf("ForDisableKeepAlives = %v, map size = %d; want 0", disableKeep, got)
 		}
 	}
 }

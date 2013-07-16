@@ -247,10 +247,12 @@ func (server *Server) register(rcvr interface{}, name string, useName bool) erro
 		sname = name
 	}
 	if sname == "" {
-		log.Fatal("rpc: no service name for type", s.typ.String())
+		s := "rpc.Register: no service name for type " + s.typ.String()
+		log.Print(s)
+		return errors.New(s)
 	}
 	if !isExported(sname) && !useName {
-		s := "rpc Register: type " + sname + " is not exported"
+		s := "rpc.Register: type " + sname + " is not exported"
 		log.Print(s)
 		return errors.New(s)
 	}
@@ -258,7 +260,6 @@ func (server *Server) register(rcvr interface{}, name string, useName bool) erro
 		return errors.New("rpc: service already defined: " + sname)
 	}
 	s.name = sname
-	s.method = make(map[string]*methodType)
 
 	// Install the methods
 	s.method = suitableMethods(s.typ, true)
@@ -560,20 +561,23 @@ func (server *Server) readRequestHeader(codec ServerCodec) (service *service, mt
 	// we can still recover and move on to the next request.
 	keepReading = true
 
-	serviceMethod := strings.Split(req.ServiceMethod, ".")
-	if len(serviceMethod) != 2 {
+	dot := strings.LastIndex(req.ServiceMethod, ".")
+	if dot < 0 {
 		err = errors.New("rpc: service/method request ill-formed: " + req.ServiceMethod)
 		return
 	}
+	serviceName := req.ServiceMethod[:dot]
+	methodName := req.ServiceMethod[dot+1:]
+
 	// Look up the request.
 	server.mu.RLock()
-	service = server.serviceMap[serviceMethod[0]]
+	service = server.serviceMap[serviceName]
 	server.mu.RUnlock()
 	if service == nil {
 		err = errors.New("rpc: can't find service " + req.ServiceMethod)
 		return
 	}
-	mtype = service.method[serviceMethod[1]]
+	mtype = service.method[methodName]
 	if mtype == nil {
 		err = errors.New("rpc: can't find method " + req.ServiceMethod)
 	}
