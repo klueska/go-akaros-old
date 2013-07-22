@@ -1,0 +1,10 @@
+[paths]
+default = https://code.google.com/p/go
+
+[extensions]
+mq =
+purge =
+codereview = /home/eecs/klueska/projects/go/lib/codereview/codereview.py
+
+[ui]
+username = Kevin Klues <klueska@gmail.com>
