@@ -1187,7 +1187,7 @@ func (p *parser) parseIndexOrSlice(x ast.Expr) ast.Expr {
 
 	if ncolons > 0 {
 		// slice expression
-		return &ast.SliceExpr{X: x, Lbrack: lbrack, Low: index[0], High: index[1], Max: index[2], Rbrack: rbrack}
+		return &ast.SliceExpr{X: x, Lbrack: lbrack, Low: index[0], High: index[1], Max: index[2], Slice3: ncolons == 2, Rbrack: rbrack}
 	}
 
 	return &ast.IndexExpr{X: x, Lbrack: lbrack, Index: index[0], Rbrack: rbrack}
@@ -1408,7 +1408,7 @@ L:
 			}
 			switch p.tok {
 			case token.IDENT:
-				x = p.parseSelector(p.checkExpr(x))
+				x = p.parseSelector(p.checkExprOrType(x))
 			case token.LPAREN:
 				x = p.parseTypeAssertion(p.checkExpr(x))
 			default:
@@ -2385,7 +2385,7 @@ func (p *parser) parseFile() *ast.File {
 	// Go spec: The package clause is not a declaration;
 	// the package name does not appear in any scope.
 	ident := p.parseIdent()
-	if ident.Name == "_" {
+	if ident.Name == "_" && p.mode&DeclarationErrors != 0 {
 		p.error(p.pos, "invalid package name _")
 	}
 	p.expectSemi()

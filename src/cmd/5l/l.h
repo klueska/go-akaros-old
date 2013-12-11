@@ -154,8 +154,6 @@ struct	Sym
 	int32	elfsym;
 	int32	locals;	// size of stack frame locals area
 	int32	args;	// size of stack frame incoming arguments area
-	int32	nptrs;	// number of bits in the pointer map
-	uint32*	ptrs;	// pointer map data
 	uchar	special;
 	uchar	fnptr;	// used as fn ptr
 	uchar	stkcheck;
@@ -185,7 +183,6 @@ struct	Sym
 	Reloc*	r;
 	int32	nr;
 	int32	maxr;
-	int 	rel_ro;
 };
 
 #define SIGNINTERN	(1729*325*1729)
@@ -295,7 +292,6 @@ EXTERN	int32	INITDAT;		/* data location */
 EXTERN	int32	INITRND;		/* data round above text location */
 EXTERN	int32	INITTEXT;		/* text location */
 EXTERN	char*	INITENTRY;		/* entry point */
-EXTERN	char*	LIBINITENTRY;		/* shared library entry point */
 EXTERN	int32	autosize;
 EXTERN	Auto*	curauto;
 EXTERN	Auto*	curhist;
@@ -366,7 +362,7 @@ int	aclass(Adr*);
 void	addhist(int32, int);
 Prog*	appendp(Prog*);
 void	asmb(void);
-void	asmout(Prog*, Optab*, int32*);
+void	asmout(Prog*, Optab*, int32*, Sym*);
 int32	atolwhex(char*);
 Prog*	brloop(Prog*);
 void	buildop(void);
@@ -436,7 +432,6 @@ int32	immaddr(int32);
 int32	opbra(int, int);
 int	brextra(Prog*);
 int	isbranch(Prog*);
-void	fnptrs(void);
 void	doelf(void);
 void	dozerostk(void); // used by -Z
 

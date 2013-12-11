@@ -213,8 +213,8 @@ will compile the test binary and then run it as
 
 	pkg.test -test.v -test.cpuprofile=prof.out -dir=testdata -update
 
-The test flags that generate profiles also leave the test binary in pkg.test
-for use when analyzing the profiles.
+The test flags that generate profiles (other than for coverage) also
+leave the test binary in pkg.test for use when analyzing the profiles.
 
 Flags not recognized by 'go test' must be placed after any specified packages.
 `,
@@ -272,6 +272,7 @@ var (
 	testCoverPaths   []string   // -coverpkg flag
 	testCoverPkgs    []*Package // -coverpkg flag
 	testProfile      bool       // some profiling flag
+	testNeedBinary   bool       // profile needs to keep binary around
 	testI            bool       // -i flag
 	testV            bool       // -v flag
 	testFiles        []string   // -file flag(s)  TODO: not respected
@@ -378,7 +379,7 @@ func runTest(cmd *Command, args []string) {
 			a.deps = append(a.deps, b.action(modeInstall, modeInstall, p))
 		}
 		b.do(a)
-		if !testC {
+		if !testC || a.failed {
 			return
 		}
 		b.init()
@@ -422,10 +423,12 @@ func runTest(cmd *Command, args []string) {
 			if strings.HasPrefix(str, "\n") {
 				str = str[1:]
 			}
+			failed := fmt.Sprintf("FAIL\t%s [setup failed]\n", p.ImportPath)
+
 			if p.ImportPath != "" {
-				errorf("# %s\n%s", p.ImportPath, str)
+				errorf("# %s\n%s\n%s", p.ImportPath, str, failed)
 			} else {
-				errorf("%s", str)
+				errorf("%s\n%s", str, failed)
 			}
 			continue
 		}
@@ -445,16 +448,15 @@ func runTest(cmd *Command, args []string) {
 		}
 	}
 
-	// If we are benchmarking, force everything to
-	// happen in serial.  Could instead allow all the
-	// builds to run before any benchmarks start,
-	// but try this for now.
-	if testBench {
-		for i, a := range builds {
-			if i > 0 {
-				// Make build of test i depend on
-				// completing the run of test i-1.
-				a.deps = append(a.deps, runs[i-1])
+	// Force benchmarks to run in serial.
+	if !testC && testBench {
+		// The first run must wait for all builds.
+		// Later runs must wait for the previous run's print.
+		for i, run := range runs {
+			if i == 0 {
+				run.deps = append(run.deps, builds...)
+			} else {
+				run.deps = append(run.deps, prints[i-1])
 			}
 		}
 	}
@@ -515,8 +517,8 @@ func contains(x []string, s string) bool {
 func (b *builder) test(p *Package) (buildAction, runAction, printAction *action, err error) {
 	if len(p.TestGoFiles)+len(p.XTestGoFiles) == 0 {
 		build := &action{p: p}
-		run := &action{p: p}
-		print := &action{f: (*builder).notest, p: p, deps: []*action{build}}
+		run := &action{p: p, deps: []*action{build}}
+		print := &action{f: (*builder).notest, p: p, deps: []*action{run}}
 		return build, run, print, nil
 	}
 
@@ -590,7 +592,7 @@ func (b *builder) test(p *Package) (buildAction, runAction, printAction *action,
 	localCover := testCover && testCoverPaths == nil
 
 	// Test package.
-	if len(p.TestGoFiles) > 0 || localCover {
+	if len(p.TestGoFiles) > 0 || localCover || p.Name == "main" {
 		ptest = new(Package)
 		*ptest = *p
 		ptest.GoFiles = nil
@@ -728,7 +730,7 @@ func (b *builder) test(p *Package) (buildAction, runAction, printAction *action,
 	a.target = filepath.Join(testDir, testBinary) + exeSuffix
 	pmainAction := a
 
-	if testC || testProfile {
+	if testC || testNeedBinary {
 		// -c or profiling flag: create action to copy binary to ./test.out.
 		runAction = &action{
 			f:      (*builder).install,
@@ -896,10 +898,23 @@ func (b *builder) runTest(a *action) error {
 		go func() {
 			done <- cmd.Wait()
 		}()
+	Outer:
 		select {
 		case err = <-done:
 			// ok
 		case <-tick.C:
+			if signalTrace != nil {
+				// Send a quit signal in the hope that the program will print
+				// a stack trace and exit. Give it five seconds before resorting
+				// to Kill.
+				cmd.Process.Signal(signalTrace)
+				select {
+				case err = <-done:
+					fmt.Fprintf(&buf, "*** Test killed with %v: ran too long (%v).\n", signalTrace, testKillTimeout)
+					break Outer
+				case <-time.After(5 * time.Second):
+				}
+			}
 			cmd.Process.Kill()
 			err = <-done
 			fmt.Fprintf(&buf, "*** Test killed: ran too long (%v).\n", testKillTimeout)
@@ -997,7 +1012,7 @@ type coverInfo struct {
 func writeTestmain(out string, pmain, p *Package) error {
 	var cover []coverInfo
 	for _, cp := range pmain.imports {
-		if cp.coverVars != nil {
+		if len(cp.coverVars) > 0 {
 			cover = append(cover, coverInfo{cp, cp.coverVars})
 		}
 	}

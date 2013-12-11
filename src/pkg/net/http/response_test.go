@@ -348,6 +348,29 @@ some body`,
 
 		"some body",
 	},
+
+	// Unchunked response without Content-Length, Request is nil
+	{
+		"HTTP/1.0 200 OK\r\n" +
+			"Connection: close\r\n" +
+			"\r\n" +
+			"Body here\n",
+
+		Response{
+			Status:     "200 OK",
+			StatusCode: 200,
+			Proto:      "HTTP/1.0",
+			ProtoMajor: 1,
+			ProtoMinor: 0,
+			Header: Header{
+				"Connection": {"close"}, // TODO(rsc): Delete?
+			},
+			Close:         true,
+			ContentLength: -1,
+		},
+
+		"Body here\n",
+	},
 }
 
 func TestReadResponse(t *testing.T) {
@@ -589,5 +612,18 @@ func TestResponseContentLengthShortBody(t *testing.T) {
 	}
 	if err != io.ErrUnexpectedEOF {
 		t.Errorf("io.Copy error = %#v; want io.ErrUnexpectedEOF", err)
+	}
+}
+
+func TestNeedsSniff(t *testing.T) {
+	// needsSniff returns true with an empty response.
+	r := &response{}
+	if got, want := r.needsSniff(), true; got != want {
+		t.Errorf("needsSniff = %t; want %t", got, want)
+	}
+	// needsSniff returns false when Content-Type = nil.
+	r.handlerHeader = Header{"Content-Type": nil}
+	if got, want := r.needsSniff(), false; got != want {
+		t.Errorf("needsSniff empty Content-Type = %t; want %t", got, want)
 	}
 }

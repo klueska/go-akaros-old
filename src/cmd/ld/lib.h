@@ -46,7 +46,7 @@ enum
 	SFUNCTAB,
 	STYPELINK,
 	SSYMTAB, // TODO: move to unmapped section
-	SPCLNTAB, // TODO: move to unmapped section
+	SPCLNTAB,
 	SELFROSECT,
 	
 	/* writable, non-executable */
@@ -55,7 +55,7 @@ enum
 	SMACHO,	/* Mach-O __nl_symbol_ptr */
 	SMACHOGOT,
 	SNOPTRDATA,
-	SDATARELRO,
+	SINITARR,
 	SDATA,
 	SWINDOWS,
 	SBSS,
@@ -79,13 +79,6 @@ enum
 	SHIDDEN = 1<<9, // hidden or local symbol
 
 	NHASH = 100003,
-};
-
-enum
-{
-	// This value is known to the garbage collector and should be kept in
-	// sync with runtime/pkg/runtime.h
-	ArgsSizeUnknown = 0x80000000
 };
 
 typedef struct Library Library;
@@ -167,6 +160,7 @@ EXTERN	char**	ldflag;
 EXTERN	int	havedynamic;
 EXTERN	int	iscgo;
 EXTERN	int	elfglobalsymndx;
+EXTERN	char*	flag_installsuffix;
 EXTERN	int	flag_race;
 EXTERN	int flag_shared;
 EXTERN	char*	tracksym;
@@ -219,7 +213,6 @@ double	ieeedtod(Ieee *e);
 void	undefsym(Sym *s);
 void	zerosig(char *sp);
 void	readundefs(char *f, int t);
-int32	Bget4(Biobuf *f);
 void	loadlib(void);
 void	errorexit(void);
 void	mangle(char*);
@@ -227,12 +220,10 @@ void	objfile(char *file, char *pkg);
 void	libinit(void);
 void	pclntab(void);
 void	symtab(void);
-void	functab(void);
 void	Lflag(char *arg);
 void	usage(void);
 void	adddynrel(Sym*, Reloc*);
 void	adddynrela(Sym*, Sym*, Reloc*);
-Sym*	lookuprel(void);
 void	ldobj1(Biobuf *f, char*, int64 len, char *pn);
 void	ldobj(Biobuf*, char*, int64, char*, char*, int);
 void	ldelf(Biobuf*, char*, int64, char*);
@@ -353,6 +344,7 @@ enum {
 	Hfreebsd,	// FreeBSD ELF
 	Hwindows,	// MS Windows PE
 	Hopenbsd,	// OpenBSD ELF
+	Hdragonfly,	// DragonFly ELF
 };
 
 typedef struct Header Header;

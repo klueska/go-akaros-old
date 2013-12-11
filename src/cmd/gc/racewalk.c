@@ -238,6 +238,7 @@ racewalknode(Node **np, NodeList **init, int wr, int skip)
 		callinstr(&n, init, wr, skip);
 		goto ret;
 
+	case OSPTR:
 	case OLEN:
 	case OCAP:
 		racewalknode(&n->left, init, 0, 0);
@@ -398,7 +399,7 @@ racewalknode(Node **np, NodeList **init, int wr, int skip)
 	// does not require instrumentation
 	case OPRINT:     // don't bother instrumenting it
 	case OPRINTN:    // don't bother instrumenting it
-	case OCHECKNOTNIL: // always followed by a read.
+	case OCHECKNIL: // always followed by a read.
 	case OPARAM:     // it appears only in fn->exit to copy heap params back
 	case OCLOSUREVAR:// immutable pointer to captured variable
 	case ODOTMETH:   // either part of CALLMETH or CALLPART (lowered to PTRLIT)
@@ -530,6 +531,7 @@ uintptraddr(Node *n)
 	Node *r;
 
 	r = nod(OADDR, n, N);
+	r->bounded = 1;
 	r = conv(r, types[TUNSAFEPTR]);
 	r = conv(r, types[TUINTPTR]);
 	return r;

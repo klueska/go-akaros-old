@@ -140,16 +140,17 @@ func serveContent(w ResponseWriter, r *Request, name string, modtime time.Time, 
 
 	code := StatusOK
 
-	// If Content-Type isn't set, use the file's extension to find it.
-	ctype := w.Header().Get("Content-Type")
-	if ctype == "" {
+	// If Content-Type isn't set, use the file's extension to find it, but
+	// if the Content-Type is unset explicitly, do not sniff the type.
+	ctypes, haveType := w.Header()["Content-Type"]
+	var ctype string
+	if !haveType {
 		ctype = mime.TypeByExtension(filepath.Ext(name))
 		if ctype == "" {
 			// read a chunk to decide between utf-8 text and binary
-			var buf [1024]byte
+			var buf [sniffLen]byte
 			n, _ := io.ReadFull(content, buf[:])
-			b := buf[:n]
-			ctype = DetectContentType(b)
+			ctype = DetectContentType(buf[:n])
 			_, err := content.Seek(0, os.SEEK_SET) // rewind to output whole file
 			if err != nil {
 				Error(w, "seeker can't seek", StatusInternalServerError)
@@ -157,6 +158,8 @@ func serveContent(w ResponseWriter, r *Request, name string, modtime time.Time, 
 			}
 		}
 		w.Header().Set("Content-Type", ctype)
+	} else if len(ctypes) > 0 {
+		ctype = ctypes[0]
 	}
 
 	size, err := sizeFunc()
@@ -174,7 +177,7 @@ func serveContent(w ResponseWriter, r *Request, name string, modtime time.Time, 
 			Error(w, err.Error(), StatusRequestedRangeNotSatisfiable)
 			return
 		}
-		if sumRangesSize(ranges) >= size {
+		if sumRangesSize(ranges) > size {
 			// The total number of bytes in all the ranges
 			// is larger than the size of the file by
 			// itself, so this is probably an attack, or a

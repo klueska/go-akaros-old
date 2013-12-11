@@ -905,8 +905,6 @@ doelf(void)
 	addstring(shstrtab, ".elfdata");
 	addstring(shstrtab, ".rodata");
 	addstring(shstrtab, ".typelink");
-	if(flag_shared)
-		addstring(shstrtab, ".data.rel.ro");
 	addstring(shstrtab, ".gosymtab");
 	addstring(shstrtab, ".gopclntab");
 	
@@ -934,6 +932,14 @@ doelf(void)
 		}
 		// add a .note.GNU-stack section to mark the stack as non-executable
 		addstring(shstrtab, ".note.GNU-stack");
+	}
+
+	if(flag_shared) {
+		addstring(shstrtab, ".init_array");
+		if(thechar == '6')
+			addstring(shstrtab, ".rela.init_array");
+		else
+			addstring(shstrtab, ".rel.init_array");
 	}
 
 	if(!debug['s']) {
@@ -1064,13 +1070,6 @@ doelf(void)
 		
 		elfwritedynent(s, DT_DEBUG, 0);
 
-		if(flag_shared) {
-			Sym *init_sym = lookup(LIBINITENTRY, 0);
-			if(init_sym->type != STEXT)
-				diag("entry not text: %s", init_sym->name);
-			elfwritedynentsym(s, DT_INIT, init_sym);
-		}
-
 		// Do not write DT_NULL.  elfdynhash will finish it.
 	}
 }
@@ -1189,6 +1188,9 @@ asmbelf(vlong symo)
 				break;
 			case Hopenbsd:
 				interpreter = openbsddynld;
+				break;
+			case Hdragonfly:
+				interpreter = dragonflydynld;
 				break;
 			}
 		}
@@ -1462,6 +1464,8 @@ elfobj:
 		eh->ident[EI_OSABI] = ELFOSABI_NETBSD;
 	else if(HEADTYPE == Hopenbsd)
 		eh->ident[EI_OSABI] = ELFOSABI_OPENBSD;
+	else if(HEADTYPE == Hdragonfly)
+		eh->ident[EI_OSABI] = ELFOSABI_NONE;
 	if(PtrSize == 8)
 		eh->ident[EI_CLASS] = ELFCLASS64;
 	else
@@ -1469,9 +1473,7 @@ elfobj:
 	eh->ident[EI_DATA] = ELFDATA2LSB;
 	eh->ident[EI_VERSION] = EV_CURRENT;
 
-	if(flag_shared)
-		eh->type = ET_DYN;
-	else if(linkmode == LinkExternal)
+	if(linkmode == LinkExternal)
 		eh->type = ET_REL;
 	else
 		eh->type = ET_EXEC;

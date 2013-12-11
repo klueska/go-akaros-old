@@ -31,6 +31,7 @@
 #include <u.h>
 #include <libc.h>
 #include "gg.h"
+#include "../../pkg/runtime/funcdata.h"
 
 // TODO(rsc): Can make this bigger if we move
 // the text segment up higher in 8l for all GOOS.
@@ -206,6 +207,16 @@ ggloblnod(Node *nam)
 		p->from.scale = RODATA;
 	if(nam->type != T && !haspointers(nam->type))
 		p->from.scale |= NOPTR;
+}
+
+void
+gargsize(int32 size)
+{
+	Node n1, n2;
+	
+	nodconst(&n1, types[TINT32], PCDATA_ArgSize);
+	nodconst(&n2, types[TINT32], size);
+	gins(APCDATA, &n1, &n2);
 }
 
 void
@@ -1146,6 +1157,7 @@ ismem(Node *n)
 {
 	switch(n->op) {
 	case OITAB:
+	case OSPTR:
 	case OLEN:
 	case OCAP:
 	case OINDREG:
@@ -2159,43 +2171,6 @@ gins(int as, Node *f, Node *t)
 	return p;
 }
 
-// Generate an instruction referencing *n
-// to force segv on nil pointer dereference.
-void
-checkref(Node *n, int force)
-{
-	Node m;
-
-	if(!force && isptr[n->type->etype] && n->type->type->width < unmappedzero)
-		return;
-
-	regalloc(&m, types[TUINTPTR], n);
-	cgen(n, &m);
-	m.xoffset = 0;
-	m.op = OINDREG;
-	m.type = types[TUINT8];
-	gins(ATESTB, nodintconst(0), &m);
-	regfree(&m);
-}
-
-static void
-checkoffset(Addr *a, int canemitcode)
-{
-	Prog *p;
-
-	if(a->offset < unmappedzero)
-		return;
-	if(!canemitcode)
-		fatal("checkoffset %#x, cannot emit code", a->offset);
-
-	// cannot rely on unmapped nil page at 0 to catch
-	// reference with large offset.  instead, emit explicit
-	// test of 0(reg).
-	p = gins(ATESTB, nodintconst(0), N);
-	p->to = *a;
-	p->to.offset = 0;
-}
-
 /*
  * generate code to compute n;
  * make a refer to result.
@@ -2345,8 +2320,16 @@ naddr(Node *n, Addr *a, int canemitcode)
 			break;	// len(nil)
 		a->etype = tptr;
 		a->width = widthptr;
-		if(a->offset >= unmappedzero && a->offset-Array_nel < unmappedzero)
-			checkoffset(a, canemitcode);
+		break;
+
+	case OSPTR:
+		// pointer in a string or slice
+		naddr(n->left, a, canemitcode);
+		if(a->type == D_CONST && a->offset == 0)
+			break;	// ptr(nil)
+		a->etype = simtype[TUINTPTR];
+		a->offset += Array_array;
+		a->width = widthptr;
 		break;
 
 	case OLEN:
@@ -2357,8 +2340,6 @@ naddr(Node *n, Addr *a, int canemitcode)
 		a->etype = TUINT32;
 		a->offset += Array_nel;
 		a->width = 4;
-		if(a->offset >= unmappedzero && a->offset-Array_nel < unmappedzero)
-			checkoffset(a, canemitcode);
 		break;
 
 	case OCAP:
@@ -2369,8 +2350,6 @@ naddr(Node *n, Addr *a, int canemitcode)
 		a->etype = TUINT32;
 		a->offset += Array_cap;
 		a->width = 4;
-		if(a->offset >= unmappedzero && a->offset-Array_nel < unmappedzero)
-			checkoffset(a, canemitcode);
 		break;
 
 //	case OADD:

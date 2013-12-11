@@ -203,7 +203,7 @@ func parseCodeLine(line string, expectCode int) (code int, continued bool, messa
 
 // ReadCodeLine reads a response code line of the form
 //	code message
-// where code is a 3-digit status code and the message
+// where code is a three-digit status code and the message
 // extends to the rest of the line.  An example of such a line is:
 //	220 plan9.bell-labs.com ESMTP
 //
@@ -231,7 +231,7 @@ func (r *Reader) ReadCodeLine(expectCode int) (code int, message string, err err
 //	...
 //	code message line n
 //
-// where code is a 3-digit status code. The first line starts with the
+// where code is a three-digit status code. The first line starts with the
 // code and a hyphen. The response is terminated by a line that starts
 // with the same code followed by a space. Each line in message is
 // separated by a newline (\n).
@@ -574,13 +574,10 @@ func canonicalMIMEHeaderKey(a []byte) string {
 		// and upper case after each dash.
 		// (Host, User-Agent, If-Modified-Since).
 		// MIME headers are ASCII only, so no Unicode issues.
-		if a[i] == ' ' {
-			a[i] = '-'
-			upper = true
-			continue
-		}
 		c := a[i]
-		if upper && 'a' <= c && c <= 'z' {
+		if c == ' ' {
+			c = '-'
+		} else if upper && 'a' <= c && c <= 'z' {
 			c -= toLower
 		} else if !upper && 'A' <= c && c <= 'Z' {
 			c += toLower

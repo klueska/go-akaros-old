@@ -43,6 +43,7 @@ char linuxdynld[] = "/lib64/ld-linux-x86-64.so.2";
 char freebsddynld[] = "/libexec/ld-elf.so.1";
 char openbsddynld[] = "/usr/libexec/ld.so";
 char netbsddynld[] = "/libexec/ld.elf_so";
+char dragonflydynld[] = "/usr/libexec/ld-elf.so.2";
 
 char	zeroes[32];
 
@@ -98,12 +99,6 @@ int nelfsym = 1;
 
 static void addpltsym(Sym*);
 static void addgotsym(Sym*);
-
-Sym *
-lookuprel(void)
-{
-	return lookup(".rela", 0);
-}
 
 void
 adddynrela(Sym *rela, Sym *s, Reloc *r)
@@ -312,9 +307,12 @@ elfreloc1(Reloc *r, vlong sectoff)
 		break;
 	
 	case D_TLS:
-		if(r->siz == 4)
-			VPUT(R_X86_64_TPOFF32 | (uint64)elfsym<<32);
-		else
+		if(r->siz == 4) {
+			if(flag_shared)
+				VPUT(R_X86_64_GOTTPOFF | (uint64)elfsym<<32);
+			else
+				VPUT(R_X86_64_TPOFF32 | (uint64)elfsym<<32);
+		} else
 			return -1;
 		break;		
 	}
@@ -675,6 +673,7 @@ asmb(void)
 	case Hfreebsd:
 	case Hnetbsd:
 	case Hopenbsd:
+	case Hdragonfly:
 		debug['8'] = 1;	/* 64-bit addresses */
 		break;
 	case Hwindows:
@@ -703,6 +702,7 @@ asmb(void)
 		case Hfreebsd:
 		case Hnetbsd:
 		case Hopenbsd:
+		case Hdragonfly:
 			symo = rnd(HEADR+segtext.len, INITRND)+rnd(segrodata.len, INITRND)+segdata.filelen;
 			symo = rnd(symo, INITRND);
 			break;
@@ -793,6 +793,7 @@ asmb(void)
 	case Hfreebsd:
 	case Hnetbsd:
 	case Hopenbsd:
+	case Hdragonfly:
 		asmbelf(symo);
 		break;
 	case Hwindows:

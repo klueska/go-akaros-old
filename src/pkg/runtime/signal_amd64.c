@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// +build darwin freebsd linux netbsd openbsd
+// +build darwin dragonfly freebsd linux netbsd openbsd
 
 #include "runtime.h"
 #include "defs_GOOS_GOARCH.h"
@@ -47,8 +47,7 @@ runtime·sighandler(int32 sig, Siginfo *info, void *ctxt, G *gp)
 	bool crash;
 
 	if(sig == SIGPROF) {
-		if(gp != m->g0 && gp != m->gsignal)
-			runtime·sigprof((byte*)SIG_RIP(info, ctxt), (byte*)SIG_RSP(info, ctxt), nil, gp);
+		runtime·sigprof((byte*)SIG_RIP(info, ctxt), (byte*)SIG_RSP(info, ctxt), nil, gp);
 		return;
 	}
 

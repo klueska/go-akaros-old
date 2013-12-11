@@ -159,10 +159,7 @@ struct	Sym
 	int32	got;
 	int32	align;	// if non-zero, required alignment in bytes
 	int32	elfsym;
-	int32	locals;	// size of stack frame locals area
 	int32	args;	// size of stack frame incoming arguments area
-	int32	nptrs;	// number of bits in the pointer map
-	uint32*	ptrs;	// pointer map data
 	Sym*	hash;	// in hash table
 	Sym*	allsym;	// in all symbol list
 	Sym*	next;	// in text or data list
@@ -190,14 +187,13 @@ struct	Sym
 	Reloc*	r;
 	int32	nr;
 	int32	maxr;
-	int 	rel_ro;
 };
 struct	Optab
 {
 	short	as;
 	uchar*	ytab;
 	uchar	prefix;
-	uchar	op[22];
+	uchar	op[23];
 };
 struct	Movtab
 {
@@ -332,7 +328,6 @@ EXTERN	int32	INITRND;
 EXTERN	int64	INITTEXT;
 EXTERN	int64	INITDAT;
 EXTERN	char*	INITENTRY;		/* entry point */
-EXTERN	char*	LIBINITENTRY;		/* shared library entry point */
 EXTERN	char*	pcstr;
 EXTERN	Auto*	curauto;
 EXTERN	Auto*	curhist;

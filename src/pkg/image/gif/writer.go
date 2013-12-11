@@ -10,6 +10,7 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	"image/color/palette"
 	"image/draw"
 	"io"
 )
@@ -52,9 +53,6 @@ type encoder struct {
 	err error
 	// g is a reference to the data that is being encoded.
 	g *GIF
-	// bitsPerPixel is the number of bits required to represent each color
-	// in the image.
-	bitsPerPixel int
 	// buf is a scratch buffer. It must be at least 768 so we can write the color map.
 	buf [1024]byte
 }
@@ -118,22 +116,18 @@ func (e *encoder) writeHeader() {
 		return
 	}
 
-	// TODO: This bases the global color table on the first image
-	// only.
 	pm := e.g.Image[0]
 	// Logical screen width and height.
 	writeUint16(e.buf[0:2], uint16(pm.Bounds().Dx()))
 	writeUint16(e.buf[2:4], uint16(pm.Bounds().Dy()))
 	e.write(e.buf[:4])
 
-	e.bitsPerPixel = log2(len(pm.Palette)) + 1
-	e.buf[0] = 0x80 | ((uint8(e.bitsPerPixel) - 1) << 4) | (uint8(e.bitsPerPixel) - 1)
+	// All frames have a local color table, so a global color table
+	// is not needed.
+	e.buf[0] = 0x00
 	e.buf[1] = 0x00 // Background Color Index.
 	e.buf[2] = 0x00 // Pixel Aspect Ratio.
 	e.write(e.buf[:3])
-
-	// Global Color Table.
-	e.writeColorTable(pm.Palette, e.bitsPerPixel-1)
 
 	// Add animation info if necessary.
 	if len(e.g.Image) > 1 {
@@ -232,7 +226,7 @@ func (e *encoder) writeImageBlock(pm *image.Paletted, delay int) {
 	// Local Color Table.
 	e.writeColorTable(pm.Palette, paddedSize)
 
-	litWidth := e.bitsPerPixel
+	litWidth := paddedSize + 1
 	if litWidth < 2 {
 		litWidth = 2
 	}
@@ -255,7 +249,7 @@ type Options struct {
 	NumColors int
 
 	// Quantizer is used to produce a palette with size NumColors.
-	// color.Plan9Palette is used in place of a nil Quantizer.
+	// palette.Plan9 is used in place of a nil Quantizer.
 	Quantizer draw.Quantizer
 
 	// Drawer is used to convert the source image to the desired palette.
@@ -315,7 +309,7 @@ func Encode(w io.Writer, m image.Image, o *Options) error {
 	pm, ok := m.(*image.Paletted)
 	if !ok || len(pm.Palette) > opts.NumColors {
 		// TODO: Pick a better sub-sample of the Plan 9 palette.
-		pm = image.NewPaletted(b, color.Plan9Palette[:opts.NumColors])
+		pm = image.NewPaletted(b, palette.Plan9[:opts.NumColors])
 		if opts.Quantizer != nil {
 			pm.Palette = opts.Quantizer.Quantize(make(color.Palette, 0, opts.NumColors), m)
 		}

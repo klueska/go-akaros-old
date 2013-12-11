@@ -61,7 +61,8 @@ case "$GOHOSTOS-$GOOS-$GOARCH-$CGO_ENABLED" in
 linux-linux-amd64-1 | darwin-darwin-amd64-1)
 	echo
 	echo '# Testing race detector.'
-	go test -race -i flag
+	go test -race -i runtime/race flag
+	go test -race -run=Output runtime/race
 	go test -race -short flag
 esac
 
@@ -103,7 +104,8 @@ go run $GOROOT/test/run.go - . || exit 1
 [ "$CGO_ENABLED" != 1 ] ||
 (xcd ../misc/cgo/test
 go test -ldflags '-linkmode=auto' || exit 1
-go test -ldflags '-linkmode=internal' || exit 1
+# linkmode=internal fails on dragonfly since errno is a TLS relocation.
+[ "$GOHOSTOS" == dragonfly ] || go test -ldflags '-linkmode=internal' || exit 1
 case "$GOHOSTOS-$GOARCH" in
 openbsd-386 | openbsd-amd64)
 	# test linkmode=external, but __thread not supported, so skip testtls.
@@ -117,11 +119,19 @@ darwin-386 | darwin-amd64)
 	*) go test -ldflags '-linkmode=external'  || exit 1;;
 	esac
 	;;
-freebsd-386 | freebsd-amd64 | linux-386 | linux-amd64 | netbsd-386 | netbsd-amd64)
+dragonfly-386 | dragonfly-amd64 | freebsd-386 | freebsd-amd64 | linux-386 | linux-amd64 | linux-arm | netbsd-386 | netbsd-amd64)
 	go test -ldflags '-linkmode=external' || exit 1
 	go test -ldflags '-linkmode=auto' ../testtls || exit 1
 	go test -ldflags '-linkmode=external' ../testtls || exit 1
 esac
+) || exit $?
+
+# This tests cgo -godefs. That mode is not supported,
+# so it's okay if it doesn't work on some systems.
+# In particular, it works badly with clang on OS X.
+[ "$CGO_ENABLED" != 1 ] || [ "$GOOS" == darwin ] ||
+(xcd ../misc/cgo/testcdefs
+./test.bash || exit 1
 ) || exit $?
 
 [ "$CGO_ENABLED" != 1 ] ||
@@ -136,6 +146,12 @@ esac
 go run main.go || exit 1
 ) || exit $?
 
+[ "$CGO_ENABLED" != 1 ] ||
+[ "$GOHOSTOS" == windows ] ||
+(xcd ../misc/cgo/errors
+./test.bash || exit 1
+) || exit $?
+
 (xcd ../doc/progs
 time ./run || exit 1
 ) || exit $?
@@ -147,15 +163,13 @@ make clean || exit 1
 ) || exit $?
 
 (xcd ../doc/codewalk
-# TODO: test these too.
-go build pig.go || exit 1
-go build urlpoll.go || exit 1
-rm -f pig urlpoll
+time ./run || exit 1
 ) || exit $?
 
 echo
-echo '#' ../misc/dashboard/builder ../misc/goplay
-go build ../misc/dashboard/builder ../misc/goplay
+echo '#' ../misc/goplay
+go build ../misc/goplay
+rm -f goplay
 
 [ "$GOARCH" == arm ] ||
 (xcd ../test/bench/shootout
@@ -176,7 +190,7 @@ time go run run.go || exit 1
 
 echo
 echo '# Checking API compatibility.'
-go tool api -c $GOROOT/api/go1.txt,$GOROOT/api/go1.1.txt -next $GOROOT/api/next.txt -except $GOROOT/api/except.txt
+time go run $GOROOT/src/cmd/api/run.go
 
 echo
 echo ALL TESTS PASSED

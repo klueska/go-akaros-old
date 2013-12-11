@@ -37,13 +37,12 @@ static void imported(char *pkg, char *import);
 static int
 hashstr(char *name)
 {
-	int h;
+	uint32 h;
 	char *cp;
 
 	h = 0;
 	for(cp = name; *cp; h += *cp++)
 		h *= 1119;
-	// not if(h < 0) h = ~h, because gcc 4.3 -O2 miscompiles it.
 	h &= 0xffffff;
 	return h;
 }
@@ -499,6 +498,9 @@ loadcgo(char *file, char *pkg, char *p, int n)
 			local = expandpkg(local, pkg);
 			s = lookup(local, 0);
 
+			if(flag_shared && s == lookup("main", 0))
+				continue;
+
 			// export overrides import, for openbsd/cgo.
 			// see issue 4878.
 			if(s->dynimplib != nil) {
@@ -680,8 +682,6 @@ deadcode(void)
 		Bprint(&bso, "%5.2f deadcode\n", cputime());
 
 	mark(lookup(INITENTRY, 0));
-	if(flag_shared)
-		mark(lookup(LIBINITENTRY, 0));
 	for(i=0; i<nelem(markextra); i++)
 		mark(lookup(markextra[i], 0));
 

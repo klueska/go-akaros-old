@@ -90,7 +90,7 @@ static char* _typekind[] = {
 	[TARRAY]	= "array",
 	[TFUNC]		= "func",
 	[TNIL]		= "nil",
-	[TIDEAL]	= "ideal number",
+	[TIDEAL]	= "untyped number",
 };
 
 static char*
@@ -928,11 +928,7 @@ reswitch:
 		goto ret;
 
 	case OSEND:
-		if(top & Erv) {
-			yyerror("send statement %N used as value; use select for non-blocking send", n);
-			goto error;
-		}
-		ok |= Etop | Erv;
+		ok |= Etop;
 		l = typecheck(&n->left, Erv);
 		typecheck(&n->right, Erv);
 		defaultlit(&n->left, T);
@@ -1576,7 +1572,20 @@ reswitch:
 			fatal("OITAB of %T", t);
 		n->type = ptrto(types[TUINTPTR]);
 		goto ret;
-	
+
+	case OSPTR:
+		ok |= Erv;
+		typecheck(&n->left, Erv);
+		if((t = n->left->type) == T)
+			goto error;
+		if(!isslice(t) && t->etype != TSTRING)
+			fatal("OSPTR of %T", t);
+		if(t->etype == TSTRING)
+			n->type = ptrto(types[TUINT8]);
+		else
+			n->type = ptrto(t->type);
+		goto ret;
+
 	case OCLOSUREVAR:
 		ok |= Erv;
 		goto ret;
@@ -3050,7 +3059,7 @@ queuemethod(Node *n)
 Node*
 typecheckdef(Node *n)
 {
-	int lno;
+	int lno, nerrors0;
 	Node *e;
 	Type *t;
 	NodeList *l;
@@ -3178,7 +3187,13 @@ typecheckdef(Node *n)
 		n->walkdef = 1;
 		n->type = typ(TFORW);
 		n->type->sym = n->sym;
+		nerrors0 = nerrors;
 		typecheckdeftype(n);
+		if(n->type->etype == TFORW && nerrors > nerrors0) {
+			// Something went wrong during type-checking,
+			// but it was reported. Silence future errors.
+			n->type->broke = 1;
+		}
 		if(curfn)
 			resumecheckwidth();
 		break;

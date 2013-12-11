@@ -15,6 +15,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"net/http"
 	. "net/http"
 	"net/http/httptest"
 	"net/url"
@@ -469,12 +470,18 @@ func TestTransportHeadResponses(t *testing.T) {
 		res, err := c.Head(ts.URL)
 		if err != nil {
 			t.Errorf("error on loop %d: %v", i, err)
+			continue
 		}
 		if e, g := "123", res.Header.Get("Content-Length"); e != g {
 			t.Errorf("loop %d: expected Content-Length header of %q, got %q", i, e, g)
 		}
 		if e, g := int64(123), res.ContentLength; e != g {
 			t.Errorf("loop %d: expected res.ContentLength of %v, got %v", i, e, g)
+		}
+		if all, err := ioutil.ReadAll(res.Body); err != nil {
+			t.Errorf("loop %d: Body ReadAll: %v", i, err)
+		} else if len(all) != 0 {
+			t.Errorf("Bogus body %q", all)
 		}
 	}
 }
@@ -823,7 +830,7 @@ func TestTransportPersistConnLeakShortBody(t *testing.T) {
 	}
 	nhigh := runtime.NumGoroutine()
 	tr.CloseIdleConnections()
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(400 * time.Millisecond)
 	runtime.GC()
 	nfinal := runtime.NumGoroutine()
 
@@ -1608,6 +1615,42 @@ func TestIdleConnChannelLeak(t *testing.T) {
 			t.Fatalf("ForDisableKeepAlives = %v, map size = %d; want 0", disableKeep, got)
 		}
 	}
+}
+
+// Verify the status quo: that the Client.Post function coerces its
+// body into a ReadCloser if it's a Closer, and that the Transport
+// then closes it.
+func TestTransportClosesRequestBody(t *testing.T) {
+	defer afterTest(t)
+	ts := httptest.NewServer(http.HandlerFunc(func(w ResponseWriter, r *Request) {
+		io.Copy(ioutil.Discard, r.Body)
+	}))
+	defer ts.Close()
+
+	tr := &Transport{}
+	defer tr.CloseIdleConnections()
+	cl := &Client{Transport: tr}
+
+	closes := 0
+
+	res, err := cl.Post(ts.URL, "text/plain", countCloseReader{&closes, strings.NewReader("hello")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if closes != 1 {
+		t.Errorf("closes = %d; want 1", closes)
+	}
+}
+
+type countCloseReader struct {
+	n *int
+	io.Reader
+}
+
+func (cr countCloseReader) Close() error {
+	(*cr.n)++
+	return nil
 }
 
 // rgz is a gzip quine that uncompresses to itself.

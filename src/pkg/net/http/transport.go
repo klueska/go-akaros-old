@@ -13,7 +13,6 @@ import (
 	"bufio"
 	"compress/gzip"
 	"crypto/tls"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -273,7 +272,9 @@ func (cm *connectMethod) proxyAuth() string {
 		return ""
 	}
 	if u := cm.proxyURL.User; u != nil {
-		return "Basic " + base64.URLEncoding.EncodeToString([]byte(u.String()))
+		username := u.Username()
+		password, _ := u.Password()
+		return "Basic " + basicAuth(username, password)
 	}
 	return ""
 }
@@ -514,8 +515,8 @@ func (t *Transport) dialConn(cm *connectMethod) (*persistConn, error) {
 		if err = conn.(*tls.Conn).Handshake(); err != nil {
 			return nil, err
 		}
-		if t.TLSClientConfig == nil || !t.TLSClientConfig.InsecureSkipVerify {
-			if err = conn.(*tls.Conn).VerifyHostname(cm.tlsHost()); err != nil {
+		if !cfg.InsecureSkipVerify {
+			if err = conn.(*tls.Conn).VerifyHostname(cfg.ServerName); err != nil {
 				return nil, err
 			}
 		}

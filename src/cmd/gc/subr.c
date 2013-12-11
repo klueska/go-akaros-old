@@ -322,7 +322,7 @@ setlineno(Node *n)
 uint32
 stringhash(char *p)
 {
-	int32 h;
+	uint32 h;
 	int c;
 
 	h = 0;
@@ -333,9 +333,9 @@ stringhash(char *p)
 		h = h*PRIME1 + c;
 	}
 
-	if(h < 0) {
+	if((int32)h < 0) {
 		h = -h;
-		if(h < 0)
+		if((int32)h < 0)
 			h = 0;
 	}
 	return h;
@@ -525,7 +525,7 @@ saveorignode(Node *n)
 	n->orig = norig;
 }
 
-// ispaddedfield returns whether the given field
+// ispaddedfield reports whether the given field
 // is followed by padding. For the case where t is
 // the last field, total gives the size of the enclosing struct.
 static int
@@ -546,6 +546,9 @@ algtype1(Type *t, Type **bad)
 	
 	if(bad)
 		*bad = T;
+
+	if(t->noalg)
+		return ANOEQ;
 
 	switch(t->etype) {
 	case TANY:
@@ -1411,6 +1414,9 @@ assignconv(Node *n, Type *t, char *context)
 	if(n == N || n->type == T || n->type->broke)
 		return n;
 
+	if(t->etype == TBLANK && n->type->etype == TNIL)
+		yyerror("use of untyped nil");
+
 	old = n;
 	old->diag++;  // silence errors about n; we'll issue one below
 	defaultlit(&n, t);
@@ -2177,7 +2183,7 @@ lookdot0(Sym *s, Type *t, Type **save, int ignorecase)
 	c = 0;
 	if(u->etype == TSTRUCT || u->etype == TINTER) {
 		for(f=u->type; f!=T; f=f->down)
-			if(f->sym == s || (ignorecase && ucistrcmp(f->sym->name, s->name) == 0)) {
+			if(f->sym == s || (ignorecase && f->type->etype == TFUNC && f->type->thistuple > 0 && ucistrcmp(f->sym->name, s->name) == 0)) {
 				if(save)
 					*save = f;
 				c++;
@@ -2585,6 +2591,7 @@ genwrapper(Type *rcvr, Type *method, Sym *newnam, int iface)
 		n->left = newname(methodsym(method->sym, methodrcvr, 0));
 		fn->nbody = list(fn->nbody, n);
 	} else {
+		fn->wrapper = 1; // ignore frame for panic+recover matching
 		call = nod(OCALL, dot, N);
 		call->list = args;
 		call->isddd = isddd;
@@ -3769,7 +3776,7 @@ isbadimport(Strlit *path)
 }
 
 void
-checknotnil(Node *x, NodeList **init)
+checknil(Node *x, NodeList **init)
 {
 	Node *n;
 	
@@ -3777,7 +3784,7 @@ checknotnil(Node *x, NodeList **init)
 		x = nod(OITAB, x, N);
 		typecheck(&x, Erv);
 	}
-	n = nod(OCHECKNOTNIL, x, N);
+	n = nod(OCHECKNIL, x, N);
 	n->typecheck = 1;
 	*init = list(*init, n);
 }

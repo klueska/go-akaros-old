@@ -33,6 +33,7 @@
 #include	"lib.h"
 #include	"../ld/elf.h"
 #include	"../../pkg/runtime/stack.h"
+#include	"../../pkg/runtime/funcdata.h"
 
 #include	<ar.h>
 
@@ -90,7 +91,7 @@ Lflag(char *arg)
 void
 libinit(void)
 {
-	char *race;
+	char *suffix, *suffixsep;
 
 	fmtinstall('i', iconv);
 	fmtinstall('Y', Yconv);
@@ -100,10 +101,16 @@ libinit(void)
 		print("goarch is not known: %s\n", goarch);
 
 	// add goroot to the end of the libdir list.
-	race = "";
-	if(flag_race)
-		race = "_race";
-	Lflag(smprint("%s/pkg/%s_%s%s", goroot, goos, goarch, race));
+	suffix = "";
+	suffixsep = "";
+	if(flag_installsuffix != nil) {
+		suffixsep = "_";
+		suffix = flag_installsuffix;
+	} else if(flag_race) {
+		suffixsep = "_";
+		suffix = "race";
+	}
+	Lflag(smprint("%s/pkg/%s_%s%s%s", goroot, goos, goarch, suffixsep, suffix));
 
 	// Unix doesn't like it when we write to a running (or, sometimes,
 	// recently run) binary, so remove the output file before writing it.
@@ -118,17 +125,14 @@ libinit(void)
 	}
 
 	if(INITENTRY == nil) {
-		INITENTRY = mal(strlen(goarch)+strlen(goos)+10);
-		sprint(INITENTRY, "_rt0_%s_%s", goarch, goos);
+		INITENTRY = mal(strlen(goarch)+strlen(goos)+20);
+		if(!flag_shared) {
+			sprint(INITENTRY, "_rt0_%s_%s", goarch, goos);
+		} else {
+			sprint(INITENTRY, "_rt0_%s_%s_lib", goarch, goos);
+		}
 	}
 	lookup(INITENTRY, 0)->type = SXREF;
-	if(flag_shared) {
-		if(LIBINITENTRY == nil) {
-			LIBINITENTRY = mal(strlen(goarch)+strlen(goos)+20);
-			sprint(LIBINITENTRY, "_rt0_%s_%s_lib", goarch, goos);
-		}
-		lookup(LIBINITENTRY, 0)->type = SXREF;
-	}
 }
 
 void
@@ -230,7 +234,7 @@ addlib(char *src, char *obj)
 	if(p != nil)
 		*p = '\0';
 
-	if(debug['v'])
+	if(debug['v'] > 1)
 		Bprint(&bso, "%5.2f addlib: %s %s pulls in %s\n", cputime(), obj, src, pname);
 
 	addlibpath(src, obj, pname, name);
@@ -307,7 +311,13 @@ void
 loadlib(void)
 {
 	int i, w, x;
-	Sym *s;
+	Sym *s, *gmsym;
+
+	if(flag_shared) {
+		s = lookup("runtime.islibrary", 0);
+		s->dupok = 1;
+		adduint8(s, 1);
+	}
 
 	loadinternal("runtime");
 	if(thechar == '5')
@@ -329,7 +339,7 @@ loadlib(void)
 	}
 
 	for(i=0; i<libraryp; i++) {
-		if(debug['v'])
+		if(debug['v'] > 1)
 			Bprint(&bso, "%5.2f autolib: %s (from %s)\n", cputime(), library[i].file, library[i].objref);
 		iscgo |= strcmp(library[i].pkg, "runtime/cgo") == 0;
 		objfile(library[i].file, library[i].pkg);
@@ -358,6 +368,15 @@ loadlib(void)
 			}
 	}
 	
+	gmsym = lookup("runtime.tlsgm", 0);
+	gmsym->type = STLSBSS;
+	gmsym->size = 2*PtrSize;
+	gmsym->hide = 1;
+	if(linkmode == LinkExternal && iself && HEADTYPE != Hopenbsd)
+		gmsym->reachable = 1;
+	else
+		gmsym->reachable = 0;
+
 	// Now that we know the link mode, trim the dynexp list.
 	x = CgoExportDynamic;
 	if(linkmode == LinkExternal)
@@ -432,7 +451,7 @@ objfile(char *file, char *pkg)
 
 	pkg = smprint("%i", pkg);
 
-	if(debug['v'])
+	if(debug['v'] > 1)
 		Bprint(&bso, "%5.2f ldobj: %s (%s)\n", cputime(), file, pkg);
 	Bflush(&bso);
 	f = Bopen(file, 0);
@@ -569,6 +588,16 @@ ldhostobj(void (*ld)(Biobuf*, char*, int64, char*), Biobuf *f, char *pkg, int64 
 		}
 	}
 
+	// DragonFly declares errno with __thread, which results in a symbol
+	// type of R_386_TLS_GD or R_X86_64_TLSGD. The Go linker does not
+	// currently know how to handle TLS relocations, hence we have to
+	// force external linking for any libraries that link in code that
+	// uses errno. This can be removed if the Go linker ever supports
+	// these relocation types.
+	if(HEADTYPE == Hdragonfly)
+	if(strcmp(pkg, "net") == 0 || strcmp(pkg, "os/user") == 0)
+		isinternal = 0;
+
 	if(!isinternal)
 		externalobj = 1;
 
@@ -668,7 +697,7 @@ hostlink(void)
 		p = strchr(p + 1, ' ');
 	}
 
-	argv = malloc((10+nhostobj+nldflag+c)*sizeof argv[0]);
+	argv = malloc((13+nhostobj+nldflag+c)*sizeof argv[0]);
 	argc = 0;
 	if(extld == nil)
 		extld = "gcc";
@@ -681,7 +710,7 @@ hostlink(void)
 		argv[argc++] = "-m64";
 		break;
 	case '5':
-		// nothing required for arm
+		argv[argc++] = "-marm";
 		break;
 	}
 	if(!debug['s'] && !debug_s) {
@@ -695,6 +724,10 @@ hostlink(void)
 	if(iself && AssumeGoldLinker)
 		argv[argc++] = "-Wl,--rosegment";
 
+	if(flag_shared) {
+		argv[argc++] = "-Wl,-Bsymbolic";
+		argv[argc++] = "-shared";
+	}
 	argv[argc++] = "-o";
 	argv[argc++] = outfile;
 	
@@ -784,10 +817,10 @@ ldobj(Biobuf *f, char *pkg, int64 len, char *pn, char *file, int whence)
 
 	pn = estrdup(pn);
 
-	c1 = Bgetc(f);
-	c2 = Bgetc(f);
-	c3 = Bgetc(f);
-	c4 = Bgetc(f);
+	c1 = BGETC(f);
+	c2 = BGETC(f);
+	c3 = BGETC(f);
+	c4 = BGETC(f);
 	Bungetc(f);
 	Bungetc(f);
 	Bungetc(f);
@@ -865,12 +898,12 @@ ldobj(Biobuf *f, char *pkg, int64 len, char *pn, char *file, int whence)
 	/* skip over exports and other info -- ends with \n!\n */
 	import0 = Boffset(f);
 	c1 = '\n';	// the last line ended in \n
-	c2 = Bgetc(f);
-	c3 = Bgetc(f);
+	c2 = BGETC(f);
+	c3 = BGETC(f);
 	while(c1 != '\n' || c2 != '!' || c3 != '\n') {
 		c1 = c2;
 		c2 = c3;
-		c3 = Bgetc(f);
+		c3 = BGETC(f);
 		if(c3 == Beof)
 			goto eof;
 	}
@@ -924,7 +957,7 @@ _lookup(char *symb, int v, int creat)
 {
 	Sym *s;
 	char *p;
-	int32 h;
+	uint32 h;
 	int c;
 
 	h = v;
@@ -1204,16 +1237,6 @@ zerosig(char *sp)
 	s->sig = 0;
 }
 
-int32
-Bget4(Biobuf *f)
-{
-	uchar p[4];
-
-	if(Bread(f, p, 4) != 4)
-		return 0;
-	return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
-}
-
 void
 mywhatsys(void)
 {
@@ -1359,103 +1382,6 @@ addsection(Segment *seg, char *name, int rwx)
 }
 
 void
-pclntab(void)
-{
-	vlong oldpc;
-	Prog *p;
-	int32 oldlc, v, s;
-	Sym *sym;
-	uchar *bp;
-	
-	sym = lookup("pclntab", 0);
-	sym->type = SPCLNTAB;
-	sym->reachable = 1;
-	if(debug['s'])
-		return;
-
-	oldpc = INITTEXT;
-	oldlc = 0;
-	for(cursym = textp; cursym != nil; cursym = cursym->next) {
-		for(p = cursym->text; p != P; p = p->link) {
-			if(p->line == oldlc || p->as == ATEXT || p->as == ANOP || p->as == AUSEFIELD) {
-				if(debug['O'])
-					Bprint(&bso, "%6llux %P\n",
-						(vlong)p->pc, p);
-				continue;
-			}
-			if(debug['O'])
-				Bprint(&bso, "\t\t%6d", lcsize);
-			v = (p->pc - oldpc) / MINLC;
-			while(v) {
-				s = 127;
-				if(v < 127)
-					s = v;
-				symgrow(sym, lcsize+1);
-				bp = sym->p + lcsize;
-				*bp = s+128;	/* 129-255 +pc */
-				if(debug['O'])
-					Bprint(&bso, " pc+%d*%d(%d)", s, MINLC, s+128);
-				v -= s;
-				lcsize++;
-			}
-			s = p->line - oldlc;
-			oldlc = p->line;
-			oldpc = p->pc + MINLC;
-			if(s > 64 || s < -64) {
-				symgrow(sym, lcsize+5);
-				bp = sym->p + lcsize;
-				*bp++ = 0;	/* 0 vv +lc */
-				*bp++ = s>>24;
-				*bp++ = s>>16;
-				*bp++ = s>>8;
-				*bp = s;
-				if(debug['O']) {
-					if(s > 0)
-						Bprint(&bso, " lc+%d(%d,%d)\n",
-							s, 0, s);
-					else
-						Bprint(&bso, " lc%d(%d,%d)\n",
-							s, 0, s);
-					Bprint(&bso, "%6llux %P\n",
-						(vlong)p->pc, p);
-				}
-				lcsize += 5;
-				continue;
-			}
-			symgrow(sym, lcsize+1);
-			bp = sym->p + lcsize;
-			if(s > 0) {
-				*bp = 0+s;	/* 1-64 +lc */
-				if(debug['O']) {
-					Bprint(&bso, " lc+%d(%d)\n", s, 0+s);
-					Bprint(&bso, "%6llux %P\n",
-						(vlong)p->pc, p);
-				}
-			} else {
-				*bp = 64-s;	/* 65-128 -lc */
-				if(debug['O']) {
-					Bprint(&bso, " lc%d(%d)\n", s, 64-s);
-					Bprint(&bso, "%6llux %P\n",
-						(vlong)p->pc, p);
-				}
-			}
-			lcsize++;
-		}
-	}
-	if(lcsize & 1) {
-		symgrow(sym, lcsize+1);
-		sym->p[lcsize] = 129;
-		lcsize++;
-	}
-	sym->size = lcsize;
-	lcsize = 0;
-
-	if(debug['v'] || debug['O'])
-		Bprint(&bso, "lcsize = %d\n", lcsize);
-	Bflush(&bso);
-}
-
-void
 addvarint(Sym *s, uint32 val)
 {
 	int32 n;
@@ -1472,7 +1398,7 @@ addvarint(Sym *s, uint32 val)
 	p = s->p + s->np - n;
 	for(v = val; v >= 0x80; v >>= 7)
 		*p++ = v | 0x80;
-	*p++ = v;
+	*p = v;
 }
 
 // funcpctab appends to dst a pc-value table mapping the code in func to the values
@@ -1519,7 +1445,7 @@ funcpctab(Sym *dst, Sym *func, char *desc, int32 (*valfunc)(Sym*, int32, Prog*, 
 		if(val == oldval && started) {
 			val = valfunc(func, val, p, 1, arg);
 			if(debug['O'])
-				Bprint(&bso, "%6llux %6s %P\n", p->pc, "", p);
+				Bprint(&bso, "%6llux %6s %P\n", (vlong)p->pc, "", p);
 			continue;
 		}
 
@@ -1530,7 +1456,7 @@ funcpctab(Sym *dst, Sym *func, char *desc, int32 (*valfunc)(Sym*, int32, Prog*, 
 		if(p->link && p->link->pc == p->pc) {
 			val = valfunc(func, val, p, 1, arg);
 			if(debug['O'])
-				Bprint(&bso, "%6llux %6s %P\n", p->pc, "", p);
+				Bprint(&bso, "%6llux %6s %P\n", (vlong)p->pc, "", p);
 			continue;
 		}
 
@@ -1549,11 +1475,9 @@ funcpctab(Sym *dst, Sym *func, char *desc, int32 (*valfunc)(Sym*, int32, Prog*, 
 		// where the 0x80 bit indicates that the integer continues.
 
 		if(debug['O'])
-			Bprint(&bso, "%6llux %6d %P\n", p->pc, val, p);
+			Bprint(&bso, "%6llux %6d %P\n", (vlong)p->pc, val, p);
 
-		if(!started)
-			started = 1;
-		else {
+		if(started) {
 			addvarint(dst, (p->pc - pc) / MINLC);
 			pc = p->pc;
 		}
@@ -1570,7 +1494,7 @@ funcpctab(Sym *dst, Sym *func, char *desc, int32 (*valfunc)(Sym*, int32, Prog*, 
 
 	if(started) {
 		if(debug['O'])
-			Bprint(&bso, "%6llux done\n", func->value+func->size);
+			Bprint(&bso, "%6llux done\n", (vlong)func->value+func->size);
 		addvarint(dst, (func->value+func->size - pc) / MINLC);
 		addvarint(dst, 0); // terminator
 	}
@@ -1614,12 +1538,13 @@ static int32
 pctospadj(Sym *sym, int32 oldval, Prog *p, int32 phase, int32 arg)
 {
 	USED(arg);
+	USED(sym);
 
 	if(oldval == -1) // starting
 		oldval = 0;
 	if(phase == 0)
 		return oldval;
-	if(oldval + p->spadj < -10000 || oldval + p->spadj > 1000000000) {
+	if(oldval + p->spadj < -10000 || oldval + p->spadj > 1100000000) {
 		diag("overflow in spadj: %d + %d = %d", oldval, p->spadj, oldval + p->spadj);
 		errorexit();
 	}
@@ -1634,6 +1559,8 @@ pctospadj(Sym *sym, int32 oldval, Prog *p, int32 phase, int32 arg)
 static int32
 pctopcdata(Sym *sym, int32 oldval, Prog *p, int32 phase, int32 arg)
 {
+	USED(sym);
+
 	if(phase == 0 || p->as != APCDATA || p->from.offset != arg)
 		return oldval;
 	if((int32)p->to.offset != p->to.offset) {
@@ -1692,7 +1619,7 @@ le16(uchar *b)
 uint32
 le32(uchar *b)
 {
-	return b[0] | b[1]<<8 | b[2]<<16 | b[3]<<24;
+	return b[0] | b[1]<<8 | b[2]<<16 | (uint32)b[3]<<24;
 }
 
 uint64
@@ -1710,7 +1637,7 @@ be16(uchar *b)
 uint32
 be32(uchar *b)
 {
-	return b[0]<<24 | b[1]<<16 | b[2]<<8 | b[3];
+	return (uint32)b[0]<<24 | b[1]<<16 | b[2]<<8 | b[3];
 }
 
 uint64
@@ -2063,7 +1990,6 @@ genasmsym(void (*put)(Sym*, char*, int, vlong, vlong, int, Sym*))
 	Auto *a;
 	Sym *s;
 	int32 off;
-	int32 i;
 
 	// These symbols won't show up in the first loop below because we
 	// skip STEXT symbols. Normal STEXT symbols are emitted by walking textp.
@@ -2114,32 +2040,7 @@ genasmsym(void (*put)(Sym*, char*, int, vlong, vlong, int, Sym*))
 		if(s->text == nil)
 			continue;
 
-		/* filenames first */
-		for(a=s->autom; a; a=a->link)
-			if(a->type == D_FILE)
-				put(nil, a->asym->name, 'z', a->aoffset, 0, 0, 0);
-			else
-			if(a->type == D_FILE1)
-				put(nil, a->asym->name, 'Z', a->aoffset, 0, 0, 0);
-
 		put(s, s->name, 'T', s->value, s->size, s->version, s->gotype);
-
-		/* frame, locals, args, auto, param and pointers after */
-		put(nil, ".frame", 'm', (uint32)s->text->to.offset+PtrSize, 0, 0, 0);
-		put(nil, ".locals", 'm', s->locals, 0, 0, 0);
-		if((s->text->textflag & NOSPLIT) && s->args == 0 && s->nptrs < 0) {
-			// This might be a vararg function and have no
-			// predetermined argument size.  This check is
-			// approximate and will also match 0 argument
-			// nosplit functions compiled by 6c.
-			put(nil, ".args", 'm', ArgsSizeUnknown, 0, 0, 0);
-		} else
-			put(nil, ".args", 'm', s->args, 0, 0, 0);
-		if(s->nptrs >= 0) {
-			put(nil, ".nptrs", 'm', s->nptrs, 0, 0, 0);
-			for(i = 0; i < s->nptrs; i += 32)
-				put(nil, ".ptrs", 'm', s->ptrs[i / 32], 0, 0, 0);
-		}
 
 		for(a=s->autom; a; a=a->link) {
 			// Emit a or p according to actual offset, even if label is wrong.
@@ -2170,7 +2071,7 @@ genasmsym(void (*put)(Sym*, char*, int, vlong, vlong, int, Sym*))
 		}
 	}
 	if(debug['v'] || debug['n'])
-		Bprint(&bso, "symsize = %ud\n", symsize);
+		Bprint(&bso, "%5.2f symsize = %ud\n", cputime(), symsize);
 	Bflush(&bso);
 }
 
@@ -2232,10 +2133,20 @@ savehist(int32 line, int32 off)
 	Sym *file;
 	Hist *h;
 
-	tmp[0] = '\0';
-	copyhistfrog(tmp, sizeof tmp);
-
-	if(tmp[0]) {
+	// NOTE(rsc): We used to do the copyhistfrog first and this
+	// condition was if(tmp[0] != '\0') to check for an empty string,
+	// implying that histfrogp == 0, implying that this is a history pop.
+	// However, on Windows in the misc/cgo test, the linker is
+	// presented with an ANAME corresponding to an empty string,
+	// that ANAME ends up being the only histfrog, and thus we have
+	// a situation where histfrogp > 0 (not a pop) but the path we find
+	// is the empty string. Really that shouldn't happen, but it doesn't
+	// seem to be bothering anyone yet, and it's easier to fix the condition
+	// to test histfrogp than to track down where that empty string is
+	// coming from. Probably it is coming from go tool pack's P command.
+	if(histfrogp > 0) {
+		tmp[0] = '\0';
+		copyhistfrog(tmp, sizeof tmp);
 		file = lookup(tmp, HistVersion);
 		if(file->type != SFILEPATH) {
 			file->value = ++nhistfile;
@@ -2444,36 +2355,57 @@ addpctab(Sym *f, int32 off, Sym *func, char *desc, int32 (*valfunc)(Sym*, int32,
 	return setuint32(f, off, start);
 }
 
-// functab initializes the functab and filetab symbols with
+static int32
+ftabaddstring(Sym *ftab, char *s)
+{
+	int32 n, start;
+	
+	n = strlen(s)+1;
+	start = ftab->np;
+	symgrow(ftab, start+n+1);
+	strcpy((char*)ftab->p + start, s);
+	return start;
+}
+
+// pclntab initializes the pclntab symbol with
 // runtime function and file name information.
 void
-functab(void)
+pclntab(void)
 {
 	Prog *p;
-	int32 i, n, start;
+	int32 i, n, nfunc, start, funcstart;
 	uint32 *havepc, *havefunc;
-	Sym *ftab, *f;
+	Sym *ftab, *s;
 	int32 npcdata, nfuncdata, off, end;
-	char *q;
+	int64 funcdata_bytes;
 	
-	ftab = lookup("functab", 0);
-	ftab->type = SRODATA;
+	funcdata_bytes = 0;
+	ftab = lookup("pclntab", 0);
+	ftab->type = SPCLNTAB;
 	ftab->reachable = 1;
 
-	if(debug['s'])
-		return;
+	// See golang.org/s/go12symtab for the format. Briefly:
+	//	8-byte header
+	//	nfunc [PtrSize bytes]
+	//	function table, alternating PC and offset to func struct [each entry PtrSize bytes]
+	//	end PC [PtrSize bytes]
+	//	offset to file table [4 bytes]
+	nfunc = 0;
+	for(cursym = textp; cursym != nil; cursym = cursym->next)
+		nfunc++;
+	symgrow(ftab, 8+PtrSize+nfunc*2*PtrSize+PtrSize+4);
+	setuint32(ftab, 0, 0xfffffffb);
+	setuint8(ftab, 6, MINLC);
+	setuint8(ftab, 7, PtrSize);
+	setuintxx(ftab, 8, nfunc, PtrSize);
 
-	adduintxx(ftab, 0, PtrSize);
+	nfunc = 0;
+	for(cursym = textp; cursym != nil; cursym = cursym->next, nfunc++) {
+		funcstart = ftab->np;
+		funcstart += -ftab->np & (PtrSize-1);
 
-	for(cursym = textp; cursym != nil; cursym = cursym->next) {
-		q = smprint("go.func.%s", cursym->name);
-		f = lookup(q, cursym->version);
-		f->type = SRODATA;
-		f->reachable = 1;
-		free(q);
-
-		addaddrplus(ftab, cursym, 0);
-		addaddrplus(ftab, f, 0);
+		setaddr(ftab, 8+PtrSize+nfunc*2*PtrSize, cursym);
+		setuintxx(ftab, 8+PtrSize+nfunc*2*PtrSize+PtrSize, funcstart, PtrSize);
 
 		npcdata = 0;
 		nfuncdata = 0;
@@ -2484,33 +2416,25 @@ functab(void)
 				nfuncdata = p->from.offset+1;
 		}
 
-		off = 0;
 		// fixed size of struct, checked below
-		end = 2*PtrSize + 5*4 + 5*4 + npcdata*4 + nfuncdata*PtrSize;
+		off = funcstart;
+		end = funcstart + PtrSize + 3*4 + 5*4 + npcdata*4 + nfuncdata*PtrSize;
 		if(nfuncdata > 0 && (end&(PtrSize-1)))
 			end += 4;
-		symgrow(f, end);
+		symgrow(ftab, end);
 
-		// name *string
-		off = setaddr(f, off, defgostring(cursym->name));
-		
 		// entry uintptr
-		off = setaddr(f, off, cursym);
+		off = setaddr(ftab, off, cursym);
 
+		// name int32
+		off = setuint32(ftab, off, ftabaddstring(ftab, cursym->name));
+		
 		// args int32
 		// TODO: Move into funcinfo.
-		if(cursym->text == nil || (cursym->text->textflag & NOSPLIT) && cursym->args == 0 && cursym->nptrs < 0) {
-			// This might be a vararg function and have no
-			// predetermined argument size.  This check is
-			// approximate and will also match 0 argument
-			// nosplit functions compiled by 6c.
-			off = setuint32(f, off, ArgsSizeUnknown);
-		} else
-			off = setuint32(f, off, cursym->args);
-
-		// locals int32
-		// TODO: Move into funcinfo.
-		off = setuint32(f, off, cursym->locals);
+		if(cursym->text == nil)
+			off = setuint32(ftab, off, ArgsSizeUnknown);
+		else
+			off = setuint32(ftab, off, cursym->args);
 	
 		// frame int32
 		// TODO: Remove entirely. The pcsp table is more precise.
@@ -2519,32 +2443,24 @@ functab(void)
 		// We need to make sure everything has argument information
 		// and then remove this.
 		if(cursym->text == nil)
-			off = setuint32(f, off, 0);
+			off = setuint32(ftab, off, 0);
 		else
-			off = setuint32(f, off, (uint32)cursym->text->to.offset+PtrSize);
-
-		// TODO: Move into funcinfo.
-		// ptrsoff, ptrslen int32
-		start = f->np;
-		for(i = 0; i < cursym->nptrs; i += 32)
-			adduint32(f, cursym->ptrs[i/32]);
-		off = setuint32(f, off, start);
-		off = setuint32(f, off, (f->np - start)/4);
+			off = setuint32(ftab, off, (uint32)cursym->text->to.offset+PtrSize);
 
 		// pcsp table (offset int32)
-		off = addpctab(f, off, cursym, "pctospadj", pctospadj, 0);
+		off = addpctab(ftab, off, cursym, "pctospadj", pctospadj, 0);
 
 		// pcfile table (offset int32)
-		off = addpctab(f, off, cursym, "pctofileline file", pctofileline, 0);
+		off = addpctab(ftab, off, cursym, "pctofileline file", pctofileline, 0);
 
 		// pcln table (offset int32)
-		off = addpctab(f, off, cursym, "pctofileline line", pctofileline, 1);
+		off = addpctab(ftab, off, cursym, "pctofileline line", pctofileline, 1);
 		
 		// npcdata int32
-		off = setuint32(f, off, npcdata);
+		off = setuint32(ftab, off, npcdata);
 		
 		// nfuncdata int32
-		off = setuint32(f, off, nfuncdata);
+		off = setuint32(ftab, off, nfuncdata);
 		
 		// tabulate which pc and func data we have.
 		n = ((npcdata+31)/32 + (nfuncdata+31)/32)*4;
@@ -2553,7 +2469,7 @@ functab(void)
 		for(p = cursym->text; p != P; p = p->link) {
 			if(p->as == AFUNCDATA) {
 				if((havefunc[p->from.offset/32]>>(p->from.offset%32))&1)
-					diag("multiple definitions for FUNCDATA $%d", i);
+					diag("multiple definitions for FUNCDATA $%d", p->from.offset);
 				havefunc[p->from.offset/32] |= 1<<(p->from.offset%32);
 			}
 			if(p->as == APCDATA)
@@ -2563,10 +2479,10 @@ functab(void)
 		// pcdata.
 		for(i=0; i<npcdata; i++) {
 			if(!(havepc[i/32]>>(i%32))&1) {
-				off = setuint32(f, off, 0);
+				off = setuint32(ftab, off, 0);
 				continue;
 			}
-			off = addpctab(f, off, cursym, "pctopcdata", pctopcdata, i);
+			off = addpctab(ftab, off, cursym, "pctopcdata", pctopcdata, i);
 		}
 		
 		unmal(havepc, n);
@@ -2581,37 +2497,39 @@ functab(void)
 				if(p->as == AFUNCDATA) {
 					i = p->from.offset;
 					if(p->to.type == D_CONST)
-						setuintxx(f, off+PtrSize*i, p->to.offset, PtrSize);
-					else
-						setaddrplus(f, off+PtrSize*i, p->to.sym, p->to.offset);
+						setuintxx(ftab, off+PtrSize*i, p->to.offset, PtrSize);
+					else {
+						// TODO: Dedup.
+						funcdata_bytes += p->to.sym->size;
+						setaddrplus(ftab, off+PtrSize*i, p->to.sym, p->to.offset);
+					}
 				}
 			}
 			off += nfuncdata*PtrSize;
 		}
 
 		if(off != end) {
-			diag("bad math in functab: off=%d but end=%d (npcdata=%d nfuncdata=%d)", off, end, npcdata, nfuncdata);
+			diag("bad math in functab: funcstart=%d off=%d but end=%d (npcdata=%d nfuncdata=%d)", funcstart, off, end, npcdata, nfuncdata);
 			errorexit();
 		}
-		
-		f->size = f->np;
 	
 		// Final entry of table is just end pc.
-		if(cursym->next == nil) {
-			addaddrplus(ftab, cursym, cursym->size);
-			adduintxx(ftab, 0, PtrSize);
-		}
+		if(cursym->next == nil)
+			setaddrplus(ftab, 8+PtrSize+(nfunc+1)*2*PtrSize, cursym, cursym->size);
 	}
+	
+	// Start file table.
+	start = ftab->np;
+	start += -ftab->np & (PtrSize-1);
+	setuint32(ftab, 8+PtrSize+nfunc*2*PtrSize+PtrSize, start);
 
-	setuintxx(ftab, 0, (ftab->np-PtrSize)/(2*PtrSize) - 1, PtrSize);
-	ftab->size = ftab->np;
+	symgrow(ftab, start+(nhistfile+1)*4);
+	setuint32(ftab, start, nhistfile);
+	for(s = filesyms; s != S; s = s->next)
+		setuint32(ftab, start + s->value*4, ftabaddstring(ftab, s->name));
 
-	ftab = lookup("filetab", 0);
-	ftab->type = SRODATA;
-	ftab->reachable = 1;
-	symgrow(ftab, (nhistfile+1)*PtrSize);
-	setuintxx(ftab, 0, nhistfile+1, PtrSize);
-	for(f = filesyms; f != S; f = f->next)
-		setaddr(ftab, f->value*PtrSize, defgostring(f->name));
 	ftab->size = ftab->np;
+	
+	if(debug['v'])
+		Bprint(&bso, "%5.2f pclntab=%lld bytes, funcdata total %lld bytes\n", cputime(), (vlong)ftab->size, (vlong)funcdata_bytes);
 }	
