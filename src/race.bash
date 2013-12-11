@@ -9,7 +9,7 @@
 set -e
 
 function usage {
-	echo 'race detector is only supported on linux/amd64, akaros/amd64, and darwin/amd64' 1>&2
+	echo 'race detector is only supported on linux/amd64, and darwin/amd64' 1>&2
 	exit 1
 }
 
@@ -25,11 +25,6 @@ case $(uname) in
 		usage
 	fi
 	;;
-"Akaros")
-	if [ $(uname -m) != "x86_64" ]; then
-		usage
-	fi
-	;;
 *)
 	usage
 	;;
@@ -40,6 +35,8 @@ if [ ! -f make.bash ]; then
 	exit 1
 fi
 . ./make.bash --no-banner
+# golang.org/issue/5537 - we must build a race enabled cmd/cgo before trying to use it.
+go install -race cmd/cgo
 go install -race std
 go test -race -short std
 go test -race -run=nothingplease -bench=.* -benchtime=.1s -cpu=4 std
