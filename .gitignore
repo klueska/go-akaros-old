@@ -43,6 +43,7 @@ src/pkg/go/doc/headscan
 src/pkg/runtime/goc2c
 src/pkg/runtime/mkversion
 src/pkg/runtime/z*
+src/pkg/runtime/defs_akaros_*.h
 src/pkg/runtime/parlib/z*
 src/pkg/syscall/z*akaros*
 !src/pkg/syscall/zerrorstrings_akaros_*.go
