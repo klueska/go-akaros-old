@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// +build darwin dragonfly freebsd linux nacl netbsd openbsd solaris
-
 package os
 
 import "syscall"
@@ -17,7 +15,12 @@ func isExist(err error) bool {
 	case *LinkError:
 		err = pe.Err
 	}
-	return err == syscall.EEXIST || err == ErrExist
+	switch pe := err.(type) {
+		case *syscall.AkaError:
+			return pe.Errno() == syscall.EEXIST
+		default:
+	       return pe == ErrExist
+	}
 }
 
 func isNotExist(err error) bool {
@@ -29,7 +32,12 @@ func isNotExist(err error) bool {
 	case *LinkError:
 		err = pe.Err
 	}
-	return err == syscall.ENOENT || err == ErrNotExist
+	switch pe := err.(type) {
+		case *syscall.AkaError:
+			return pe.Errno() == syscall.ENOENT
+		default:
+	       return pe == ErrNotExist
+	}
 }
 
 func isPermission(err error) bool {
@@ -41,5 +49,11 @@ func isPermission(err error) bool {
 	case *LinkError:
 		err = pe.Err
 	}
-	return err == syscall.EACCES || err == syscall.EPERM || err == ErrPermission
+	switch pe := err.(type) {
+		case *syscall.AkaError:
+			return pe.Errno() == syscall.EACCES || pe.Errno() == syscall.EPERM
+		default:
+	       return pe == ErrPermission
+	}
 }
+
