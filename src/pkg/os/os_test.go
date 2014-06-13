@@ -636,6 +636,9 @@ func TestStartProcess(t *testing.T) {
 	if runtime.GOOS == "nacl" {
 		t.Skip("skipping on nacl")
 	}
+	if runtime.GOOS == "akaros" {
+		t.Skip("skipping on akaros")
+	}
 
 	var dir, cmd string
 	var args []string
@@ -1239,6 +1242,9 @@ func TestReadAtEOF(t *testing.T) {
 func testKillProcess(t *testing.T, processKiller func(p *Process)) {
 	if runtime.GOOS == "nacl" {
 		t.Skip("skipping on nacl")
+	}
+	if runtime.GOOS == "akaros" {
+		t.Skip("skipping on akaros")
 	}
 
 	dir, err := ioutil.TempDir("", "go-build")
