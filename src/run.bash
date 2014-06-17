@@ -115,6 +115,7 @@ go run $GOROOT/test/run.go - . || exit 1
 ) || exit $?
 
 [ "$CGO_ENABLED" != 1 ] ||
+[ "$GOOS" == akaros ] ||
 (xcd ../misc/cgo/test
 go test -ldflags '-linkmode=auto' || exit 1
 # linkmode=internal fails on dragonfly since errno is a TLS relocation.
@@ -132,7 +133,7 @@ darwin-386 | darwin-amd64)
 	*) go test -ldflags '-linkmode=external'  || exit 1;;
 	esac
 	;;
-akros-386 | akaros-amd64 | dragonfly-386 | dragonfly-amd64 | freebsd-386 | freebsd-amd64 | freebsd-arm | linux-386 | linux-amd64 | linux-arm | netbsd-386 | netbsd-amd64)
+akaros-386 | akaros-amd64 | dragonfly-386 | dragonfly-amd64 | freebsd-386 | freebsd-amd64 | freebsd-arm | linux-386 | linux-amd64 | linux-arm | netbsd-386 | netbsd-amd64)
 	go test -ldflags '-linkmode=external' || exit 1
 	go test -ldflags '-linkmode=auto' ../testtls || exit 1
 	go test -ldflags '-linkmode=external' ../testtls || exit 1
@@ -159,40 +160,48 @@ esac
 # This tests cgo -godefs. That mode is not supported,
 # so it's okay if it doesn't work on some systems.
 # In particular, it works badly with clang on OS X.
-[ "$CGO_ENABLED" != 1 ] || [ "$GOOS" == darwin ] ||
+[ "$CGO_ENABLED" != 1 ] || 
+[ "$GOOS" == akaros ] ||
+[ "$GOOS" == darwin ] ||
 (xcd ../misc/cgo/testcdefs
 ./test.bash || exit 1
 ) || exit $?
 
 [ "$CGO_ENABLED" != 1 ] ||
+[ "$GOOS" == akaros ] ||
 [ "$GOHOSTOS" == windows ] ||
 (xcd ../misc/cgo/testso
 ./test.bash || exit 1
 ) || exit $?
 
 [ "$CGO_ENABLED" != 1 ] ||
+[ "$GOOS" == akaros ] ||
 [ "$GOHOSTOS-$GOARCH" != linux-amd64 ] ||
 (xcd ../misc/cgo/testasan
 go run main.go || exit 1
 ) || exit $?
 
 [ "$CGO_ENABLED" != 1 ] ||
+[ "$GOOS" == akaros ] ||
 [ "$GOHOSTOS" == windows ] ||
 (xcd ../misc/cgo/errors
 ./test.bash || exit 1
 ) || exit $?
 
+[ "$GOOS" == akaros ] ||
 [ "$GOOS" == nacl ] ||
 (xcd ../doc/progs
 time ./run || exit 1
 ) || exit $?
 
+[ "$GOOS" == akaros ] ||
 [ "$GOOS" == nacl ] ||
 [ "$GOARCH" == arm ] ||  # uses network, fails under QEMU
 (xcd ../doc/articles/wiki
 ./test.bash || exit 1
 ) || exit $?
 
+[ "$GOOS" == akaros ] ||
 [ "$GOOS" == nacl ] ||
 (xcd ../doc/codewalk
 time ./run || exit 1
@@ -203,6 +212,7 @@ echo '#' ../misc/goplay
 go build ../misc/goplay
 rm -f goplay
 
+[ "$GOOS" == akaros ] ||
 [ "$GOOS" == nacl ] ||
 [ "$GOARCH" == arm ] ||
 (xcd ../test/bench/shootout
@@ -223,6 +233,7 @@ time ./runtest || exit 1
 rm -f runtest
 ) || exit $?
 
+[ "$GOOS" == akaros ] ||
 [ "$GOOS" == nacl ] ||
 (
 echo
