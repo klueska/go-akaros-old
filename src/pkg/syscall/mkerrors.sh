@@ -351,7 +351,7 @@ echo '#include <signal.h>' | $CC -x c - -E -dM $ccflags |
 	egrep -v '(SIGSTKSIZE|SIGSTKSZ|SIGRT)' |
 	sort >_signal.grep
 if [[ "includes_${uname}" == "includes_Akaros" ]]; then
-	echo '#include <ros/event.h>' | $GCC -x c - -E -dM $ccflags |
+	echo '#include <ros/event.h>' | $CC -x c - -E -dM $ccflags |
 		awk '$1=="#define" && $2 ~ /^EV_[A-Z0-9_]+$/ { print "^\t" $2 "[ \t]*=" }' |
 		sort >_event.grep
 else
