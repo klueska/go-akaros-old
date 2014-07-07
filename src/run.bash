@@ -150,6 +150,9 @@ akaros-386 | akaros-amd64 | dragonfly-386 | dragonfly-amd64 | freebsd-386 | free
 			echo "No support for static linking found (lacks libc.a?), skip cgo static linking test."
 		else
 			go test -ldflags '-linkmode=external -extldflags "-static -pthread"' ../testtls || exit 1
+			go test ../nocgo || exit 1
+			go test -ldflags '-linkmode=external' ../nocgo || exit 1
+			go test -ldflags '-linkmode=external -extldflags "-static -pthread"' ../nocgo || exit 1
 		fi
 		;;
 	esac
@@ -206,11 +209,6 @@ time ./run || exit 1
 (xcd ../doc/codewalk
 time ./run || exit 1
 ) || exit $?
-
-echo
-echo '#' ../misc/goplay
-go build ../misc/goplay
-rm -f goplay
 
 [ "$GOOS" == akaros ] ||
 [ "$GOOS" == nacl ] ||

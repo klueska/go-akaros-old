@@ -663,6 +663,12 @@ TEXT runtime·getcallerpc(SB),NOSPLIT,$0-8
 	MOVL	-8(AX),AX		// get calling pc
 	RET
 
+TEXT runtime·gogetcallerpc(SB),NOSPLIT,$0-8
+	MOVL	p+0(FP),AX		// addr of first arg
+	MOVL	-8(AX),AX		// get calling pc
+	MOVL	AX, ret+4(FP)
+	RET
+
 TEXT runtime·setcallerpc(SB),NOSPLIT,$0-16
 	MOVL	x+0(FP),AX		// addr of first arg
 	MOVL	pc+4(FP), BX		// pc to set
@@ -680,7 +686,7 @@ TEXT runtime·cputicks(SB),NOSPLIT,$0-0
 	ADDQ	DX, AX
 	RET
 
-TEXT runtime·stackguard(SB),NOSPLIT,$0-16
+TEXT runtime·stackguard(SB),NOSPLIT,$0-8
 	MOVL	SP, DX
 	MOVL	DX, sp+0(FP)
 	get_tls(CX)
@@ -714,6 +720,28 @@ TEXT runtime·memeq(SB),NOSPLIT,$0-12
 	MOVL	b+4(FP), DI
 	MOVL	count+8(FP), BX
 	JMP	runtime·memeqbody(SB)
+
+// eqstring tests whether two strings are equal.
+// See runtime_test.go:eqstring_generic for
+// equivlaent Go code.
+TEXT runtime·eqstring(SB),NOSPLIT,$0-17
+	MOVL	s1len+4(FP), AX
+	MOVL	s2len+12(FP), BX
+	CMPL	AX, BX
+	JNE	different
+	MOVL	s1str+0(FP), SI
+	MOVL	s2str+8(FP), DI
+	CMPL	SI, DI
+	JEQ	same
+	CALL	runtime·memeqbody(SB)
+	MOVB	AX, v+16(FP)
+	RET
+same:
+	MOVB	$1, v+16(FP)
+	RET
+different:
+	MOVB	$0, v+16(FP)
+	RET
 
 // a in SI
 // b in DI

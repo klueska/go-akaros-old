@@ -90,3 +90,7 @@ var MemclrBytes = memclrBytes
 func gogoBytes() int32
 
 var GogoBytes = gogoBytes
+
+func gostringW([]uint16) string
+
+var GostringW = gostringW

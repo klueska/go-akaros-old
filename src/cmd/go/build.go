@@ -2349,6 +2349,10 @@ func (b *builder) swig(p *Package, obj string, gccfiles, gxxfiles, mfiles []stri
 		outObj = append(outObj, ofile)
 	}
 
+	if err := b.swigVersionCheck(); err != nil {
+		return nil, nil, err
+	}
+
 	intgosize, err := b.swigIntSize(obj)
 	if err != nil {
 		return nil, nil, err
@@ -2385,6 +2389,41 @@ func (b *builder) swig(p *Package, obj string, gccfiles, gxxfiles, mfiles []stri
 		}
 	}
 	return outGo, outObj, nil
+}
+
+// Make sure SWIG is new enough.
+var (
+	swigCheckOnce sync.Once
+	swigCheck     error
+)
+
+func (b *builder) swigDoVersionCheck() error {
+	out, err := b.runOut("", "", nil, "swig", "-version")
+	if err != nil {
+		return err
+	}
+	re := regexp.MustCompile(`[vV]ersion +([\d])`)
+	matches := re.FindSubmatch(out)
+	if matches == nil {
+		// Can't find version number; hope for the best.
+		return nil
+	}
+	major, err := strconv.Atoi(string(matches[1]))
+	if err != nil {
+		// Can't find version number; hope for the best.
+		return nil
+	}
+	if major < 3 {
+		return errors.New("must have SWIG version >= 3.0")
+	}
+	return nil
+}
+
+func (b *builder) swigVersionCheck() error {
+	swigCheckOnce.Do(func() {
+		swigCheck = b.swigDoVersionCheck()
+	})
+	return swigCheck
 }
 
 // This code fails to build if sizeof(int) <= 32
@@ -2459,7 +2498,7 @@ func (b *builder) swigOne(p *Package, file, obj string, cxx bool, intgosize stri
 	if out, err := b.runOut(p.Dir, p.ImportPath, nil, "swig", args, file); err != nil {
 		if len(out) > 0 {
 			if bytes.Contains(out, []byte("Unrecognized option -intgosize")) {
-				return "", "", "", errors.New("must have SWIG version >= 3.0\n")
+				return "", "", "", errors.New("must have SWIG version >= 3.0")
 			}
 			b.showOutput(p.Dir, p.ImportPath, b.processOutput(out))
 			return "", "", "", errPrintedOutput

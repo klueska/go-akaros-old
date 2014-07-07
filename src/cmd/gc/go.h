@@ -236,8 +236,10 @@ enum
 	EscNone,
 	EscReturn,
 	EscNever,
-	EscBits = 4,
+	EscBits = 3,
 	EscMask = (1<<EscBits) - 1,
+	EscContentEscapes = 1<<EscBits, // value obtained by indirect of parameter escapes to some returned result
+	EscReturnBits = EscBits+1,
 };
 
 struct	Node
@@ -267,6 +269,7 @@ struct	Node
 	uchar	colas;		// OAS resulting from :=
 	uchar	diag;		// already printed error about this
 	uchar	noescape;	// func arguments do not escape
+	uchar	nosplit;	// func should not execute on separate stack
 	uchar	builtin;	// built-in name, like len or close
 	uchar	walkdef;
 	uchar	typecheck;
@@ -978,6 +981,7 @@ EXTERN	char*	flag_installsuffix;
 EXTERN	int	flag_race;
 EXTERN	int	flag_largemodel;
 EXTERN	int	noescape;
+EXTERN	int	nosplit;
 EXTERN	int	debuglive;
 EXTERN	Link*	ctxt;
 
