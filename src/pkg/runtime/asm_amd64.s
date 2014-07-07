@@ -321,8 +321,22 @@ TEXT reflect·call(SB), NOSPLIT, $0-24
 	MOVQ	$runtime·badreflectcall(SB), AX
 	JMP	AX
 
+// Argument map for the callXX frames.  Each has one
+// stack map (for the single call) with 3 arguments.
+DATA gcargs_reflectcall<>+0x00(SB)/4, $1  // 1 stackmap
+DATA gcargs_reflectcall<>+0x04(SB)/4, $6  // 3 args
+DATA gcargs_reflectcall<>+0x08(SB)/4, $(const_BitsPointer+(const_BitsPointer<<2)+(const_BitsScalar<<4))
+GLOBL gcargs_reflectcall<>(SB),RODATA,$12
+
+// callXX frames have no locals
+DATA gclocals_reflectcall<>+0x00(SB)/4, $1  // 1 stackmap
+DATA gclocals_reflectcall<>+0x04(SB)/4, $0  // 0 locals
+GLOBL gclocals_reflectcall<>(SB),RODATA,$8
+
 #define CALLFN(NAME,MAXSIZE)			\
 TEXT runtime·NAME(SB), WRAPPER, $MAXSIZE-24;	\
+	FUNCDATA $FUNCDATA_ArgsPointerMaps,gcargs_reflectcall<>(SB);	\
+	FUNCDATA $FUNCDATA_LocalsPointerMaps,gclocals_reflectcall<>(SB);\
 	/* copy arguments to stack */		\
 	MOVQ	argptr+8(FP), SI;		\
 	MOVLQZX argsize+16(FP), CX;		\
@@ -330,6 +344,7 @@ TEXT runtime·NAME(SB), WRAPPER, $MAXSIZE-24;	\
 	REP;MOVSB;				\
 	/* call function */			\
 	MOVQ	f+0(FP), DX;			\
+	PCDATA  $PCDATA_StackMapIndex, $0;	\
 	CALL	(DX);				\
 	/* copy return values back */		\
 	MOVQ	argptr+8(FP), DI;		\
@@ -843,6 +858,12 @@ TEXT runtime·getcallerpc(SB),NOSPLIT,$0-8
 	MOVQ	-8(AX),AX		// get calling pc
 	RET
 
+TEXT runtime·gogetcallerpc(SB),NOSPLIT,$0-16
+	MOVQ	p+0(FP),AX		// addr of first arg
+	MOVQ	-8(AX),AX		// get calling pc
+	MOVQ	AX,ret+8(FP)
+	RET
+
 TEXT runtime·setcallerpc(SB),NOSPLIT,$0-16
 	MOVQ	x+0(FP),AX		// addr of first arg
 	MOVQ	x+8(FP), BX
@@ -1042,6 +1063,28 @@ TEXT runtime·memeq(SB),NOSPLIT,$0-24
 	MOVQ	b+8(FP), DI
 	MOVQ	count+16(FP), BX
 	JMP	runtime·memeqbody(SB)
+
+// eqstring tests whether two strings are equal.
+// See runtime_test.go:eqstring_generic for
+// equivlaent Go code.
+TEXT runtime·eqstring(SB),NOSPLIT,$0-33
+	MOVQ	s1len+8(FP), AX
+	MOVQ	s2len+24(FP), BX
+	CMPQ	AX, BX
+	JNE	different
+	MOVQ	s1str+0(FP), SI
+	MOVQ	s2str+16(FP), DI
+	CMPQ	SI, DI
+	JEQ	same
+	CALL	runtime·memeqbody(SB)
+	MOVB	AX, v+32(FP)
+	RET
+same:
+	MOVB	$1, v+32(FP)
+	RET
+different:
+	MOVB	$0, v+32(FP)
+	RET
 
 // a in SI
 // b in DI

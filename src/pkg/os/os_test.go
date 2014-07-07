@@ -1293,6 +1293,36 @@ func TestKillStartProcess(t *testing.T) {
 	})
 }
 
+func TestGetppid(t *testing.T) {
+	switch runtime.GOOS {
+	case "nacl":
+		t.Skip("skipping on nacl")
+	case "plan9":
+		// TODO: golang.org/issue/8206
+		t.Skipf("skipping test on plan9; see issue 8206")
+	}
+
+	if Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		fmt.Print(Getppid())
+		Exit(0)
+	}
+
+	cmd := osexec.Command(Args[0], "-test.run=TestGetppid")
+	cmd.Env = append(Environ(), "GO_WANT_HELPER_PROCESS=1")
+
+	// verify that Getppid() from the forked process reports our process id
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Failed to spawn child process: %v %q", err, string(output))
+	}
+
+	childPpid := string(output)
+	ourPid := fmt.Sprintf("%d", Getpid())
+	if childPpid != ourPid {
+		t.Fatalf("Child process reports parent process id '%v', expected '%v'", childPpid, ourPid)
+	}
+}
+
 func TestKillFindProcess(t *testing.T) {
 	testKillProcess(t, func(p *Process) {
 		p2, err := FindProcess(p.Pid)
