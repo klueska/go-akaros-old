@@ -914,7 +914,13 @@ func TestOpenError(t *testing.T) {
 			t.Errorf("Open(%q, %d) returns error of %T type; want *PathError", tt.path, tt.mode, err)
 		}
 		if perr.Err != tt.error {
-			if runtime.GOOS == "plan9" || runtime.GOOS == "akaros" {
+			if runtime.GOOS == "akaros" {
+				// On akaros, the actual errno is embedded in an AkaError
+				if perr.Err.(*syscall.AkaError).Errno() == tt.error {
+					continue
+				}
+			}
+			if runtime.GOOS == "plan9" {
 				syscallErrStr := perr.Err.Error()
 				expectedErrStr := strings.Replace(tt.error.Error(), "file ", "", 1)
 				if !strings.HasSuffix(syscallErrStr, expectedErrStr) {
@@ -1304,6 +1310,8 @@ func TestKillStartProcess(t *testing.T) {
 
 func TestGetppid(t *testing.T) {
 	switch runtime.GOOS {
+	case "akaros":
+		t.Skip("skipping on akaros")
 	case "nacl":
 		t.Skip("skipping on nacl")
 	case "plan9":
