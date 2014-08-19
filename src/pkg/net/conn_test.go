@@ -38,7 +38,7 @@ func TestConnAndListener(t *testing.T) {
 			}
 		case "unixpacket":
 			switch runtime.GOOS {
-			case "darwin", "nacl", "openbsd", "plan9", "windows":
+			case "akaros", "darwin", "nacl", "openbsd", "plan9", "windows":
 				continue
 			case "freebsd": // FreeBSD 8 doesn't support unixpacket
 				continue
@@ -47,7 +47,7 @@ func TestConnAndListener(t *testing.T) {
 
 		ln, err := Listen(tt.net, tt.addr)
 		if err != nil {
-			t.Fatalf("Listen failed: %v", err)
+			t.Fatalf("Listen failed for %v, %v: %v", tt.net, tt.addr, err)
 		}
 		defer func(ln Listener, net, addr string) {
 			ln.Close()
