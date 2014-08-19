@@ -142,7 +142,7 @@ var seqpacketConnServerTests = []struct {
 
 func TestSeqpacketConnServer(t *testing.T) {
 	switch runtime.GOOS {
-	case "darwin", "nacl", "openbsd", "plan9", "windows":
+	case "akaros", "darwin", "nacl", "openbsd", "plan9", "windows":
 		fallthrough
 	case "freebsd": // FreeBSD 8 doesn't support unixpacket
 		t.Skipf("skipping test on %q", runtime.GOOS)
