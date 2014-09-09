@@ -48,7 +48,7 @@ func TestDialTimeout(t *testing.T) {
 	// TODO(bradfitz): It's hard to test this in a portable
 	// way. This is unfortunate, but works for now.
 	switch runtime.GOOS {
-	case "linux", "akaros":
+	case "linux":
 		// The kernel will start accepting TCP connections before userspace
 		// gets a chance to not accept them, so fire off a bunch to fill up
 		// the kernel's backlog.  Then we test we get a failure after that.
@@ -58,7 +58,7 @@ func TestDialTimeout(t *testing.T) {
 				errc <- err
 			}()
 		}
-	case "darwin", "plan9", "windows":
+	case "akaros", "darwin", "plan9", "windows":
 		// At least OS X 10.7 seems to accept any number of
 		// connections, ignoring listen's backlog, so resort
 		// to connecting to a hopefully-dead 127/8 address.
