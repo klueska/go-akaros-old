@@ -526,6 +526,7 @@ func TestOnlyWriteTimeout(t *testing.T) {
 	defer afterTest(t)
 	var conn net.Conn
 	var afterTimeoutErrc = make(chan error, 1)
+	var beforeWrite = make(chan bool, 1)
 	ts := httptest.NewUnstartedServer(HandlerFunc(func(w ResponseWriter, req *Request) {
 		buf := make([]byte, 512<<10)
 		_, err := w.Write(buf)
@@ -534,6 +535,7 @@ func TestOnlyWriteTimeout(t *testing.T) {
 			return
 		}
 		conn.SetWriteDeadline(time.Now().Add(-30 * time.Second))
+		beforeWrite <- true
 		_, err = w.Write(buf)
 		afterTimeoutErrc <- err
 	}))
@@ -552,7 +554,8 @@ func TestOnlyWriteTimeout(t *testing.T) {
 			errc <- err
 			return
 		}
-		time.Sleep(250 * time.Millisecond)
+		<-beforeWrite
+		time.Sleep(5 * time.Second)
 		_, err = io.Copy(ioutil.Discard, res.Body)
 		errc <- err
 	}()
@@ -561,8 +564,8 @@ func TestOnlyWriteTimeout(t *testing.T) {
 		if err == nil {
 			t.Errorf("expected an error from Get request")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for Get error")
+	case <-time.After(60 * time.Second):
+		t.Errorf("timeout waiting for Get error")
 	}
 	if err := <-afterTimeoutErrc; err == nil {
 		t.Error("expected write error after timeout")
